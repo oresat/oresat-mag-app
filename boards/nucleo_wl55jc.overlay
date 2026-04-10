@@ -1,0 +1,22 @@
+/*
+ * 2026 Q1 RM3100 demo for Oresat Mag-card, STMicro board nucleo_wl55jc
+ */
+
+#include <zephyr/dt-bindings/sensor/rm3100.h>
+
+/ {
+        aliases {
+                mag0 = &rm3100;
+        };
+};
+
+&i2c2 {
+        status = "okay";
+        clock-frequency = <DT_FREQ_K(100)>;
+        rm3100: rm3100@20 {
+                compatible = "pni,rm3100";
+                reg = <0x20>;
+                odr = <RM3100_DT_ODR_600>;
+                status = "okay";
+        };
+};
