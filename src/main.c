@@ -32,19 +32,21 @@
 #warning "- DEV 0315 - No pni,rm3100 compatible node found in the device tree"
 #endif
 
-LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(magcard_main, LOG_LEVEL_DBG);
 
 #define N		(8)
 #define M		(N/2)
 #define SQ_SZ		(N)
 #define CQ_SZ		(N)
 
-#define NODE_ID		DT_COMPAT_GET_ANY_STATUS_OKAY(pni_rm3100)
+// #define MAG0_NODE		DT_COMPAT_GET_ANY_STATUS_OKAY(pni_rm3100)
+#define MAG0_NODE		DT_ALIAS(mag0)
+#define MAG1_NODE	DT_ALIAS(mag1)
 
-// #define SAMPLE_PERIOD	DT_PROP(NODE_ID, sample_period)
-// #define SAMPLE_SIZE	DT_PROP(NODE_ID, sample_size)
+// #define SAMPLE_PERIOD	DT_PROP(MAG0_NODE, sample_period)
+// #define SAMPLE_SIZE	DT_PROP(MAG0_NODE, sample_size)
 
-#define SAMPLE_PERIOD	1.0 / DT_PROP(NODE_ID, odr)
+#define SAMPLE_PERIOD	1.0 / DT_PROP(MAG0_NODE, odr)
 #define SAMPLE_SIZE	1
 
 #define PROCESS_TIME	((M - 1) * SAMPLE_PERIOD)
@@ -83,34 +85,53 @@ SENSOR_DT_READ_IODEV(iodev, DT_COMPAT_GET_ANY_STATUS_OKAY(pni_rm3100),
 
 RTIO_DEFINE(ctx, 1, 1);
 
+SENSOR_DT_READ_IODEV(iodev_b, DT_ALIAS(mag1),
+		{SENSOR_CHAN_MAGN_X, 0},
+		{SENSOR_CHAN_MAGN_Y, 0},
+		{SENSOR_CHAN_MAGN_Z, 0},
+		{SENSOR_CHAN_MAGN_XYZ, 0});
+
+RTIO_DEFINE(ctx_b, 1, 1);
+
 int main(void)
 {
-	// const struct device *const rm3100_dev = DEVICE_DT_GET(NODE_ID);
-	const struct device *const rm3100_dev = DEVICE_DT_GET_ANY(pni_rm3100);
+	const struct device *const rm3100a_dev = DEVICE_DT_GET(MAG0_NODE);
+	const struct device *const rm3100b_dev = DEVICE_DT_GET(MAG1_NODE);
+
+	// The following commented line from RTIO sample app which involves mempool,
+	// mempool not used in Pete S' Oresat template application.
 	// struct rtio_iodev *iodev = mag0->data;
+
 	uint8_t buf[READINGS_BUFFER_SIZE] = {0};
+	uint8_t buf_b[READINGS_BUFFER_SIZE] = {0};
+
 	static uint32_t loop_count = 1;
 	int32_t rc = 0;
 
 	LOG_INF("Starting . . .");
 
-	if (check_rm3100_sensor(rm3100_dev) == NULL) {
-		LOG_ERR("Could not find the RM3100");
+	if (check_rm3100_sensor(rm3100a_dev) == NULL) {
+		LOG_ERR("Could not find RM3100 magnetometer instance 'a'");
+		return -ENODEV;
+	}
+
+	if (check_rm3100_sensor(rm3100b_dev) == NULL) {
+		LOG_ERR("Could not find RM3100 magnetometer instance 'b'");
 		return -ENODEV;
 	}
 
 	while (true) {
                 rc = sensor_read(&iodev, &ctx, buf, 128);
                 if (rc != 0) {
-                        LOG_ERR("%s: sensor_read() failed: %d", rm3100_dev->name, rc);
+                        LOG_ERR("%s: sensor_read() failed: %d", rm3100a_dev->name, rc);
                         break;
                 }
 
                 const struct sensor_decoder_api *decoder;
 
-                rc = sensor_get_decoder(rm3100_dev, &decoder);
+                rc = sensor_get_decoder(rm3100a_dev, &decoder);
                 if (rc != 0) {
-                        LOG_ERR("%s: sensor_get_decode() failed: %d", rm3100_dev->name, rc);
+                        LOG_ERR("%s: sensor_get_decode() failed: %d", rm3100a_dev->name, rc);
                         break;
                 }
 
@@ -135,11 +156,57 @@ int main(void)
 		// See zephyr/include/zephyr/drivers/sensor_data_types.h
 		// for `.value`, `.temperature`, `.humidity` and similar as
 		// they appear as members of the `readings` array:
-		LOG_INF("RM3100 readings (iter %u):  mag_x %s%d.%d mag_y %s%d.%d mag_z %s%d.%d",
+		LOG_INF("RM3100 'a' readings (iter %u):  mag0_x %s%d.%d mag0_y %s%d.%d mag0_z %s%d.%d",
 			loop_count,
 			PRIq_arg(mag_x_data.readings[0].value, 6, mag_x_data.shift),
 			PRIq_arg(mag_y_data.readings[0].value, 6, mag_y_data.shift),
 			PRIq_arg(mag_z_data.readings[0].value, 6, mag_z_data.shift));
+
+		//------------------------------------------------------
+		// For magnetometer b:
+		//------------------------------------------------------
+
+                rc = sensor_read(&iodev_b, &ctx_b, buf_b, 128);
+                if (rc != 0) {
+                        LOG_ERR("%s: sensor_read() for mag1 failed, err %d", rm3100b_dev->name, rc);
+                        break;
+                }
+
+		// QUESTION: can we reuse 'decoder'?
+		// ANSWER:  readings using original decoder are from mag0, not
+		//          mag1 so looks like we need a distinct 'decoder':
+
+                const struct sensor_decoder_api *decoder_b;
+
+                rc = sensor_get_decoder(rm3100b_dev, &decoder_b);
+                if (rc != 0) {
+                        LOG_ERR("%s: sensor_get_decode() failed: %d", rm3100b_dev->name, rc);
+                        break;
+                }
+
+                uint32_t mag1_x_fit = 0;
+                struct sensor_q31_data mag1_x_data = {0};
+                uint32_t mag1_y_fit = 0;
+                struct sensor_q31_data mag1_y_data = {0};
+                uint32_t mag1_z_fit = 0;
+                struct sensor_q31_data mag1_z_data = {0};
+
+                decoder_b->decode(buf_b, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_X, 0},
+                                                &mag1_x_fit, 1, &mag1_x_data);
+
+                decoder_b->decode(buf_b, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_Y, 0},
+                                                &mag1_y_fit, 1, &mag1_y_data);
+
+                decoder_b->decode(buf_b, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_Z, 0},
+                                                &mag1_z_fit, 1, &mag1_z_data);
+
+		LOG_INF("RM3100 'b' readings (     %u):  mag1_x %s%d.%d mag1_y %s%d.%d mag1_z %s%d.%d",
+			loop_count,
+			PRIq_arg(mag1_x_data.readings[0].value, 6, mag1_x_data.shift),
+			PRIq_arg(mag1_y_data.readings[0].value, 6, mag1_y_data.shift),
+			PRIq_arg(mag1_z_data.readings[0].value, 6, mag1_z_data.shift));
+
+		LOG_INF("---");
 
 		k_msleep(RM3100_DEMO_SLEEP_TIME_MS);
 		loop_count++;
