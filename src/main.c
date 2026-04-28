@@ -28,9 +28,9 @@
 #warning "- DEV 0315 - Node `rm3100` does not have status set to 'okay'"
 #endif
 
-#if !DT_COMPAT_GET_ANY_STATUS_OKAY(pni_rm3100)
-#warning "- DEV 0315 - No pni,rm3100 compatible node found in the device tree"
-#endif
+// #if !DT_COMPAT_GET_ANY_STATUS_OKAY(pni_rm3100)
+// #warning "- DEV 0315 - No pni,rm3100 compatible node found in the device tree"
+// #endif
 
 LOG_MODULE_REGISTER(magcard_main, LOG_LEVEL_DBG);
 
