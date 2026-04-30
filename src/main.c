@@ -108,7 +108,9 @@ int main(void)
 	static uint32_t loop_count = 1;
 	int32_t rc = 0;
 
-	LOG_INF("Starting . . .");
+	LOG_INF("Starting,");
+	LOG_INF("- DEV 0428 - pausing three seconds . . .");
+	k_msleep(3000);
 
 	if (check_rm3100_sensor(rm3100a_dev) == NULL) {
 		LOG_ERR("Could not find RM3100 magnetometer instance 'a'");
