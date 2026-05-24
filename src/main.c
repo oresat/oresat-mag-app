@@ -56,6 +56,12 @@ LOG_MODULE_REGISTER(magcard_main, LOG_LEVEL_DBG);
 
 #define RM3100_DEMO_SLEEP_TIME_MS 1000
 
+#undef DEV_MAG_ZEPHYR_ENABLE_MAGB
+
+//----------------------------------------------------------------------
+// - SECTION - routines
+//----------------------------------------------------------------------
+
 static const struct device *check_rm3100_sensor(const struct device *rm3100_dev)
 {
 	if (rm3100_dev == NULL) {
@@ -117,10 +123,12 @@ int main(void)
 		return -ENODEV;
 	}
 
+#ifdef DEV_MAG_ZEPHYR_ENABLE_MAGB
 	if (check_rm3100_sensor(rm3100b_dev) == NULL) {
 		LOG_ERR("Could not find RM3100 magnetometer instance 'b'");
 		return -ENODEV;
 	}
+#endif
 
 	while (true) {
                 rc = sensor_read(&iodev, &ctx, buf, 128);
@@ -168,6 +176,7 @@ int main(void)
 		// For magnetometer b:
 		//------------------------------------------------------
 
+#ifdef DEV_MAG_ZEPHYR_ENABLE_MAGB
                 rc = sensor_read(&iodev_b, &ctx_b, buf_b, 128);
                 if (rc != 0) {
                         LOG_ERR("%s: sensor_read() for mag1 failed, err %d", rm3100b_dev->name, rc);
@@ -207,6 +216,7 @@ int main(void)
 			PRIq_arg(mag1_x_data.readings[0].value, 6, mag1_x_data.shift),
 			PRIq_arg(mag1_y_data.readings[0].value, 6, mag1_y_data.shift),
 			PRIq_arg(mag1_z_data.readings[0].value, 6, mag1_z_data.shift));
+#endif
 
 		LOG_INF("---");
 
