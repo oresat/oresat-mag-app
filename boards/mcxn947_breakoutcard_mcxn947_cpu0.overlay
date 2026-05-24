@@ -27,3 +27,14 @@
 };
 
 /delete-node/ &bme280;
+
+/* 2026-05-21 - Though 115200 is the default baud rate for MCXN947 prototype
+  or breakout board, repeat it here because Oresat Card Debug Board v3.1
+  requires this rate.  That board is pretty much always the one Oresat team
+  will use for programming and debugging given physical connector form
+  factors. */
+
+&flexcomm4_lpuart4 {
+        status = "okay";
+        current-speed = <115200>;
+};
