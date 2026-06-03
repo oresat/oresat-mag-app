@@ -1,0 +1,50 @@
+/*
+ * 2026 Q2 mcxn947_breakoutcard overlay for mag card development work
+ */
+
+#include <zephyr/dt-bindings/sensor/rm3100.h>
+#include <zephyr/dt-bindings/sensor/icm42688.h>
+
+/ {
+        aliases {
+                mag0 = &rm3100a;
+                mag1 = &rm3100b;
+		/* imu1 = &icm42688_1; */
+        };
+};
+
+/delete-node/ &bme280;
+
+&flexcomm0_lpi2c0 {
+        rm3100a: rm3100@20 {
+                compatible = "pni,rm3100";
+                reg = <0x20>;
+                odr = <RM3100_DT_ODR_600>;
+                status = "okay";
+        };
+        rm3100b: rm3100@21 {
+                compatible = "pni,rm3100";
+                reg = <0x21>;
+                odr = <RM3100_DT_ODR_600>;
+                status = "okay";
+        };
+
+/*
+        icm42688_1: icm42688p1@d0 {
+		compatible = "invensense,icm42688";
+		reg = <0xd0>;
+		int-gpios = <&gpio2 0 GPIO_ACTIVE_HIGH>;
+		int-gpios = <&gpio2 1 GPIO_ACTIVE_HIGH>;
+                accel-pwr-mode = <ICM42688_DT_ACCEL_LN>;
+                accel-odr = <ICM42688_DT_ACCEL_ODR_1000>;
+                accel-fs = <ICM42688_DT_ACCEL_FS_16>;
+                gyro-pwr-mode = <ICM42688_DT_GYRO_LN>;
+                gyro-odr = <ICM42688_DT_GYRO_ODR_1000>;
+                gyro-fs = <ICM42688_DT_GYRO_FS_2000>;
+                axis-align-x = <SENSOR_AXIS_ALIGN_DT_Y>;
+                axis-align-y = <SENSOR_AXIS_ALIGN_DT_X>;
+                axis-align-z = <SENSOR_AXIS_ALIGN_DT_Z>;
+                status = "okay";
+	};
+*/
+};
