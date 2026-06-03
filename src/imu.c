@@ -85,7 +85,7 @@ static void handle_imu(void *p1, void *p2, void *p3)
 	}
 
 	for (;;) {
-		LOG_INF("Processing imu...");
+		//LOG_INF("Processing imu...");
 		k_sleep(K_MSEC(1000));
 	}
 }
