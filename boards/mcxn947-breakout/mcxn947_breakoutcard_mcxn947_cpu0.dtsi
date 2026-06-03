@@ -38,14 +38,15 @@
 		pwm-0 = &flexpwm1_pwm0;
 		pwm-1 = &sc_timer;
 		rtc = &rtc;
-        adc0 = &lpadc0;
+       adc0 = &lpadc0;
+   	i2c-0 = &flexcomm0_lpi2c0;
 	};
 
 	zephyr,user {
 		dac = <&dac0>;
 		dac-channel-id = <0>;
 		dac-resolution = <12>;
-        status = "okay";
+       status = "okay";
 	};
 };
 
@@ -60,9 +61,9 @@
 		zephyr,vref-mv = <3300>;
 		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS,2)>;
 		zephyr,resolution = <12>;
-        zephyr,oversampling = <5>;
+       zephyr,oversampling = <5>;
 		zephyr,input-positive = <MCUX_LPADC_CH1A>;
-        /delete-property/ zephyr,differential;
+       /delete-property/ zephyr,differential;
 	};
 	lpadc0_1: channel@1 {
 		reg = <1>;
@@ -71,9 +72,9 @@
 		zephyr,vref-mv = <3300>;
 		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS,2)>;
 		zephyr,resolution = <12>;
-        zephyr,oversampling = <5>;
+       zephyr,oversampling = <5>;
 		zephyr,input-positive = <MCUX_LPADC_CH2A>;
-        /delete-property/ zephyr,differential;
+       /delete-property/ zephyr,differential;
 	};
 };
 
