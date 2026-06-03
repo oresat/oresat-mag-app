@@ -18,19 +18,13 @@
 
 #include <stdio.h>
 
-#ifndef DT_HAS_COMPAT_STATUS_OKAY
-#warning "- DEV 0315 - macro `DT_HAS_COMPAT_STATUS_OKAY` not defined"
-#else
-#warning "- DEV 0315 - about to use `DT_HAS_COMPAT_STATUS_OKAY` . . ."
-#endif 
-
 #if !DT_HAS_COMPAT_STATUS_OKAY(pni_rm3100)
-#warning "- DEV 0315 - Node `rm3100` does not have status set to 'okay'"
+#warning "- DEV 0315 - No `rm3100` node found with status 'okay'"
 #endif
 
-// #if !DT_COMPAT_GET_ANY_STATUS_OKAY(pni_rm3100)
-// #warning "- DEV 0315 - No pni,rm3100 compatible node found in the device tree"
-// #endif
+#if !DT_HAS_COMPAT_STATUS_OKAY(invensense_icm42688)
+#warning "- DEV 0531 - No `icm42688` node found with status 'okay'"
+#endif
 
 LOG_MODULE_REGISTER(magcard_main, LOG_LEVEL_DBG);
 
@@ -39,9 +33,11 @@ LOG_MODULE_REGISTER(magcard_main, LOG_LEVEL_DBG);
 #define SQ_SZ		(N)
 #define CQ_SZ		(N)
 
-// #define MAG0_NODE		DT_COMPAT_GET_ANY_STATUS_OKAY(pni_rm3100)
-#define MAG0_NODE		DT_ALIAS(mag0)
+#define MAG0_NODE	DT_ALIAS(mag0)
 #define MAG1_NODE	DT_ALIAS(mag1)
+#if 0
+#define IMU_NODE	DT_ALIAS(imu1)
+#endif
 
 // #define SAMPLE_PERIOD	DT_PROP(MAG0_NODE, sample_period)
 // #define SAMPLE_SIZE	DT_PROP(MAG0_NODE, sample_size)
@@ -51,7 +47,6 @@ LOG_MODULE_REGISTER(magcard_main, LOG_LEVEL_DBG);
 
 #define PROCESS_TIME	((M - 1) * SAMPLE_PERIOD)
 
-// - DEV 0402 -
 #define READINGS_BUFFER_SIZE 256
 
 #define RM3100_DEMO_SLEEP_TIME_MS 1000
@@ -103,7 +98,9 @@ int main(void)
 {
 	const struct device *const rm3100a_dev = DEVICE_DT_GET(MAG0_NODE);
 	const struct device *const rm3100b_dev = DEVICE_DT_GET(MAG1_NODE);
-
+#if 0
+	const struct device *const imu_dev = DEVICE_DT_GET(IMU_NODE);
+#endif
 	// The following commented line from RTIO sample app which involves mempool,
 	// mempool not used in Pete S' Oresat template application.
 	// struct rtio_iodev *iodev = mag0->data;
@@ -120,13 +117,19 @@ int main(void)
 
 	if (check_rm3100_sensor(rm3100a_dev) == NULL) {
 		LOG_ERR("Could not find RM3100 magnetometer instance 'a'");
-		return -ENODEV;
+		// return -ENODEV;
 	}
 
 #ifdef DEV_MAG_ZEPHYR_ENABLE_MAGB
 	if (check_rm3100_sensor(rm3100b_dev) == NULL) {
 		LOG_ERR("Could not find RM3100 magnetometer instance 'b'");
-		return -ENODEV;
+		// return -ENODEV;
+	}
+#endif
+
+#if 0
+	if (!device_is_ready(imu_dev)) {
+		LOG_ERR("Could not find icm42688 IMU, err %d", rc);
 	}
 #endif
 
@@ -224,6 +227,7 @@ int main(void)
 		loop_count++;
 	}
 
+done:
 	// Zephyr requires int main() to return 0
 	return 0;
 }
