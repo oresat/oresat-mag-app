@@ -74,7 +74,7 @@ static int gpios_init(void)
 {
     int ret;
 
-    ret = gpio_pin_configure_dt(&n_mag_en, GPIO_OUTPUT);
+    ret = gpio_pin_configure_dt(&n_mag_en, GPIO_OUTPUT_INACTIVE | GPIO_ACTIVE_LOW);
     if (ret) {
         return ret;
     }
@@ -132,32 +132,51 @@ const struct device *const rm3100b_dev = DEVICE_DT_GET(MAG1_NODE);
 
 int init_mag(void)
 {
+	int ret;
+
+	k_msleep(3000);
 	LOG_INF("Initializing magnetometers");
-	if (!gpios_init()) {
-		LOG_ERR("Unable to initialize magnetometer gpio pins");
+	ret = gpios_init();
+	if (ret < 0) {
+		LOG_ERR("Unable to initialize magnetometer gpio pins: %d", ret);
+		return -ENODEV;
 	}
 	k_msleep(1000);
 	LOG_INF("Turning on mag power");
 	k_msleep(10);
-	gpio_pin_set_dt(&n_mag_en, 0); // enable the MAX892 mag power switch and breaker
+	gpio_pin_set_dt(&n_mag_en, 1); // enable the MAX892 mag power switch and breaker
 	k_msleep(10);
 	if (!gpio_pin_get_dt(&n_mag_fault)) {
 		LOG_WRN("Enabled MAX892 mag power, but got a fault");
 	}
 
+	// We use deferred initialization in the device tree so we can wait until
+	// we power up the mags before trying to talk to them. The init function for
+	// this sensor tries to read the revision ID register, which it obviously
+	// cannot do if the device is powered off.
+	ret = device_init(rm3100a_dev);
+	if (ret < 0) {
+		LOG_ERR("Error initializing rm3100a device driver: %d", ret);
+		return ret;
+	}
 	if (check_rm3100_sensor(rm3100a_dev) == NULL) {
 		LOG_ERR("Could not find RM3100 magnetometer instance 'a'");
-		return -ENODEV;
+		ret = -ENODEV;
 	}
 
 #ifdef DEV_MAG_ZEPHYR_ENABLE_MAGB
+	ret = device_init(rm3100a_dev);
+	if (ret < 0) {
+		LOG_ERR("Error initializing rm3100a device driver: %d", ret);
+		return ret;
+	}
 	if (check_rm3100_sensor(rm3100b_dev) == NULL) {
 		LOG_ERR("Could not find RM3100 magnetometer instance 'b'");
-		return -ENODEV;
+		ret = -ENODEV;
 	}
 #endif
 
-	return 0;
+	return ret;
 }
 
 static void handle_mag(void *p1, void *p2, void *p3)

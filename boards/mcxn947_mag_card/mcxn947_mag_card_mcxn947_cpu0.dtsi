@@ -61,9 +61,9 @@
 
 	maggpios: mag-gpios {
 		compatible = "mag-card";
-   	n-mag-en-gpios = <&gpio4 17 GPIO_ACTIVE_HIGH>; /* disable magnetometer power at start */
-   	n-mag-fault-gpios = <&gpio4 19 0>;
-   	mag-ready-gpios = <&gpio4 20 0>;
+		n-mag-en-gpios = <&gpio4 17 0>;
+		n-mag-fault-gpios = <&gpio4 19 0>;
+		mag-ready-gpios = <&gpio4 20 0>;
 	};
 
 	zephyr,user {
@@ -89,12 +89,14 @@
 			reg = <0x20>;
 			odr = <RM3100_DT_ODR_600>;
 			status = "okay";
+			zephyr,deferred-init;
 	};
 	rm3100b: rm3100@21 {
 			compatible = "pni,rm3100";
 			reg = <0x21>;
 			odr = <RM3100_DT_ODR_600>;
 			status = "okay";
+			zephyr,deferred-init;
 	};
 };
 
