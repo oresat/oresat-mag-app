@@ -20,6 +20,24 @@ static uint8_t imu_addr;
 #define IMU_THREAD_PRIORITY 0
 extern const k_tid_t imu_id;
 
+int check_i2c_device_presence(uint8_t addr)
+{
+	struct i2c_msg msgs[1];
+	uint8_t dst;
+
+	/* Send the address to read from */
+	msgs[0].buf = &dst;
+	msgs[0].len = 0U;
+	msgs[0].flags = I2C_MSG_WRITE | I2C_MSG_STOP;
+	if (i2c_transfer(i2c, &msgs[0], 1, addr) == 0) {
+		LOG_DBG("Device detected on i2c bus at 0x%02x", addr);
+		return 0;
+	} else {
+		LOG_DBG("Device NOT detected on i2c bus at 0x%02x", addr);
+		return -ENODEV;
+	}
+}
+
 int init_imu(void)
 {
 	int ret;
@@ -31,19 +49,12 @@ int init_imu(void)
 			return -ENODEV;
 	}
 
-	struct i2c_msg msgs[1];
-	uint8_t dst;
-
-	/* Send the address to read from */
-	msgs[0].buf = &dst;
-	msgs[0].len = 0U;
-	msgs[0].flags = I2C_MSG_WRITE | I2C_MSG_STOP;
-	if (i2c_transfer(i2c, &msgs[0], 1, IMU_DEVICE_ADDR) == 0) {
+	if (check_i2c_device_presence(IMU_DEVICE_ADDR) == 0) {
 		LOG_INF("Device detected on i2c bus at 0x%02x", IMU_DEVICE_ADDR);
 		imu_addr = IMU_DEVICE_ADDR;
 	} else {
 		LOG_INF("Device NOT detected on i2c bus at 0x%02x", IMU_DEVICE_ADDR);
-		if (i2c_transfer(i2c, &msgs[0], 1, IMU_DEVICE_ADDR_ALT) == 0) {
+		if (check_i2c_device_presence(IMU_DEVICE_ADDR_ALT) == 0) {
 			LOG_INF("Device detected on i2c bus at 0x%02x", IMU_DEVICE_ADDR_ALT);
 			imu_addr = IMU_DEVICE_ADDR_ALT;
 		} else {

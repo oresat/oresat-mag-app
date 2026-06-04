@@ -45,7 +45,9 @@
 		rtc = &rtc;
 		adc0 = &lpadc0;
 		adc1 = &lpadc1;
-   	i2c-0 = &flexcomm0_lpi2c0;
+		i2c-0 = &flexcomm0_lpi2c0;
+		mag0 = &rm3100a;
+		mag1 = &rm3100b;
 	};
 
 	leds {
@@ -83,18 +85,18 @@
 	clock-frequency = <I2C_BITRATE_STANDARD>;
 	status = "okay";
 
-   rm3100a: rm3100@20 {
-           compatible = "pni,rm3100";
-           reg = <0x20>;
-           odr = <RM3100_DT_ODR_600>;
-           status = "okay";
-   };
-   rm3100b: rm3100@21 {
-           compatible = "pni,rm3100";
-           reg = <0x21>;
-           odr = <RM3100_DT_ODR_600>;
-           status = "okay";
-   };
+	rm3100a: rm3100@20 {
+			compatible = "pni,rm3100";
+			reg = <0x20>;
+			odr = <RM3100_DT_ODR_600>;
+			status = "okay";
+	};
+	rm3100b: rm3100@21 {
+			compatible = "pni,rm3100";
+			reg = <0x21>;
+			odr = <RM3100_DT_ODR_600>;
+			status = "okay";
+	};
 };
 
 &flexcomm4 {

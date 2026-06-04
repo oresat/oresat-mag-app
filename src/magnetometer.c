@@ -58,6 +58,10 @@ LOG_MODULE_REGISTER(magcard_main, LOG_LEVEL_DBG);
 
 #undef DEV_MAG_ZEPHYR_ENABLE_MAGB
 
+#define MAG_THREAD_STACK_SIZE 2048
+#define MAG_THREAD_PRIORITY 0
+extern const k_tid_t mag_id;
+
 //----------------------------------------------------------------------
 // - SECTION - routines
 //----------------------------------------------------------------------
@@ -68,7 +72,7 @@ static const struct device *check_rm3100_sensor(const struct device *rm3100_dev)
 		/* No such node, or the node does not have status "okay". */
 		LOG_ERR("\nError: no device found.");
 		return NULL;
-        }
+		}
 
 	if (!device_is_ready(rm3100_dev)) {
 		LOG_ERR("\nError: Device \"%s\" is not ready; "
@@ -99,25 +103,11 @@ SENSOR_DT_READ_IODEV(iodev_b, DT_ALIAS(mag1),
 
 RTIO_DEFINE(ctx_b, 1, 1);
 
-int init_magnetometers(void)
+const struct device *const rm3100a_dev = DEVICE_DT_GET(MAG0_NODE);
+const struct device *const rm3100b_dev = DEVICE_DT_GET(MAG1_NODE);
+
+int init_mag(void)
 {
-	const struct device *const rm3100a_dev = DEVICE_DT_GET(MAG0_NODE);
-	const struct device *const rm3100b_dev = DEVICE_DT_GET(MAG1_NODE);
-
-	// The following commented line from RTIO sample app which involves mempool,
-	// mempool not used in Pete S' Oresat template application.
-	// struct rtio_iodev *iodev = mag0->data;
-
-	uint8_t buf[READINGS_BUFFER_SIZE] = {0};
-	uint8_t buf_b[READINGS_BUFFER_SIZE] = {0};
-
-	static uint32_t loop_count = 1;
-	int32_t rc = 0;
-
-	LOG_INF("Starting,");
-	LOG_INF("- DEV 0428 - pausing three seconds . . .");
-	k_msleep(3000);
-
 	if (check_rm3100_sensor(rm3100a_dev) == NULL) {
 		LOG_ERR("Could not find RM3100 magnetometer instance 'a'");
 		return -ENODEV;
@@ -130,38 +120,62 @@ int init_magnetometers(void)
 	}
 #endif
 
+	return 0;
+}
+
+static void handle_mag(void *p1, void *p2, void *p3)
+{
+	int err;
+
+	k_thread_name_set(mag_id, "mag_thread");
+
+	LOG_INF("Starting MAG thread");
+
+	err = init_mag();
+	if (err < 0) {
+		return;
+	}
+
+	uint8_t buf[READINGS_BUFFER_SIZE] = {0};
+#ifdef DEV_MAG_ZEPHYR_ENABLE_MAGB
+	uint8_t buf_b[READINGS_BUFFER_SIZE] = {0};
+#endif
+
+	static uint32_t loop_count = 1;
+	int32_t rc = 0;
+
 	while (true) {
-                rc = sensor_read(&iodev, &ctx, buf, 128);
-                if (rc != 0) {
-                        LOG_ERR("%s: sensor_read() failed: %d", rm3100a_dev->name, rc);
-                        break;
-                }
+		rc = sensor_read(&iodev, &ctx, buf, 128);
+		if (rc != 0) {
+				LOG_ERR("%s: sensor_read() failed: %d", rm3100a_dev->name, rc);
+				break;
+		}
 
-                const struct sensor_decoder_api *decoder;
+		const struct sensor_decoder_api *decoder;
 
-                rc = sensor_get_decoder(rm3100a_dev, &decoder);
-                if (rc != 0) {
-                        LOG_ERR("%s: sensor_get_decode() failed: %d", rm3100a_dev->name, rc);
-                        break;
-                }
+		rc = sensor_get_decoder(rm3100a_dev, &decoder);
+		if (rc != 0) {
+				LOG_ERR("%s: sensor_get_decode() failed: %d", rm3100a_dev->name, rc);
+				break;
+		}
 
-                uint32_t mag_x_fit = 0;
-                struct sensor_q31_data mag_x_data = {0};
+		uint32_t mag_x_fit = 0;
+		struct sensor_q31_data mag_x_data = {0};
 
-                decoder->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_X, 0},
-                                                &mag_x_fit, 1, &mag_x_data);
+		decoder->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_X, 0},
+										&mag_x_fit, 1, &mag_x_data);
 
-                uint32_t mag_y_fit = 0;
-                struct sensor_q31_data mag_y_data = {0};
+		uint32_t mag_y_fit = 0;
+		struct sensor_q31_data mag_y_data = {0};
 
-                decoder->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_Y, 0},
-                                                &mag_y_fit, 1, &mag_y_data);
+		decoder->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_Y, 0},
+										&mag_y_fit, 1, &mag_y_data);
 
-                uint32_t mag_z_fit = 0;
-                struct sensor_q31_data mag_z_data = {0};
+		uint32_t mag_z_fit = 0;
+		struct sensor_q31_data mag_z_data = {0};
 
-                decoder->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_Z, 0},
-                                                &mag_z_fit, 1, &mag_z_data);
+		decoder->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_Z, 0},
+										&mag_z_fit, 1, &mag_z_data);
 
 		// See zephyr/include/zephyr/drivers/sensor_data_types.h
 		// for `.value`, `.temperature`, `.humidity` and similar as
@@ -172,44 +186,44 @@ int init_magnetometers(void)
 			PRIq_arg(mag_y_data.readings[0].value, 6, mag_y_data.shift),
 			PRIq_arg(mag_z_data.readings[0].value, 6, mag_z_data.shift));
 
-		//------------------------------------------------------
-		// For magnetometer b:
-		//------------------------------------------------------
+//------------------------------------------------------
+// For magnetometer b:
+//------------------------------------------------------
 
 #ifdef DEV_MAG_ZEPHYR_ENABLE_MAGB
-                rc = sensor_read(&iodev_b, &ctx_b, buf_b, 128);
-                if (rc != 0) {
-                        LOG_ERR("%s: sensor_read() for mag1 failed, err %d", rm3100b_dev->name, rc);
-                        break;
-                }
+		rc = sensor_read(&iodev_b, &ctx_b, buf_b, 128);
+		if (rc != 0) {
+				LOG_ERR("%s: sensor_read() for mag1 failed, err %d", rm3100b_dev->name, rc);
+				break;
+		}
 
-		// QUESTION: can we reuse 'decoder'?
-		// ANSWER:  readings using original decoder are from mag0, not
-		//          mag1 so looks like we need a distinct 'decoder':
+	// QUESTION: can we reuse 'decoder'?
+	// ANSWER:  readings using original decoder are from mag0, not
+	//  		mag1 so looks like we need a distinct 'decoder':
 
-                const struct sensor_decoder_api *decoder_b;
+		const struct sensor_decoder_api *decoder_b;
 
-                rc = sensor_get_decoder(rm3100b_dev, &decoder_b);
-                if (rc != 0) {
-                        LOG_ERR("%s: sensor_get_decode() failed: %d", rm3100b_dev->name, rc);
-                        break;
-                }
+		rc = sensor_get_decoder(rm3100b_dev, &decoder_b);
+		if (rc != 0) {
+				LOG_ERR("%s: sensor_get_decode() failed: %d", rm3100b_dev->name, rc);
+				break;
+		}
 
-                uint32_t mag1_x_fit = 0;
-                struct sensor_q31_data mag1_x_data = {0};
-                uint32_t mag1_y_fit = 0;
-                struct sensor_q31_data mag1_y_data = {0};
-                uint32_t mag1_z_fit = 0;
-                struct sensor_q31_data mag1_z_data = {0};
+		uint32_t mag1_x_fit = 0;
+		struct sensor_q31_data mag1_x_data = {0};
+		uint32_t mag1_y_fit = 0;
+		struct sensor_q31_data mag1_y_data = {0};
+		uint32_t mag1_z_fit = 0;
+		struct sensor_q31_data mag1_z_data = {0};
 
-                decoder_b->decode(buf_b, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_X, 0},
-                                                &mag1_x_fit, 1, &mag1_x_data);
+		decoder_b->decode(buf_b, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_X, 0},
+										&mag1_x_fit, 1, &mag1_x_data);
 
-                decoder_b->decode(buf_b, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_Y, 0},
-                                                &mag1_y_fit, 1, &mag1_y_data);
+		decoder_b->decode(buf_b, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_Y, 0},
+										&mag1_y_fit, 1, &mag1_y_data);
 
-                decoder_b->decode(buf_b, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_Z, 0},
-                                                &mag1_z_fit, 1, &mag1_z_data);
+		decoder_b->decode(buf_b, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_Z, 0},
+										&mag1_z_fit, 1, &mag1_z_data);
 
 		LOG_INF("RM3100 'b' readings (     %u):  mag1_x %s%d.%d mag1_y %s%d.%d mag1_z %s%d.%d",
 			loop_count,
@@ -223,6 +237,7 @@ int init_magnetometers(void)
 		k_msleep(RM3100_DEMO_SLEEP_TIME_MS);
 		loop_count++;
 	}
-
-	return 0;
 }
+
+K_THREAD_DEFINE(mag_id, MAG_THREAD_STACK_SIZE, handle_mag, NULL, NULL, NULL, MAG_THREAD_PRIORITY, 0, 0);
+
