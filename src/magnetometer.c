@@ -13,6 +13,7 @@
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/sensor_data_types.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/rtio/rtio.h>
 #include <zephyr/logging/log.h>
 
@@ -39,12 +40,8 @@ LOG_MODULE_REGISTER(magcard_main, LOG_LEVEL_DBG);
 #define SQ_SZ		(N)
 #define CQ_SZ		(N)
 
-// #define MAG0_NODE		DT_COMPAT_GET_ANY_STATUS_OKAY(pni_rm3100)
-#define MAG0_NODE		DT_ALIAS(mag0)
+#define MAG0_NODE	DT_ALIAS(mag0)
 #define MAG1_NODE	DT_ALIAS(mag1)
-
-// #define SAMPLE_PERIOD	DT_PROP(MAG0_NODE, sample_period)
-// #define SAMPLE_SIZE	DT_PROP(MAG0_NODE, sample_size)
 
 #define SAMPLE_PERIOD	1.0 / DT_PROP(MAG0_NODE, odr)
 #define SAMPLE_SIZE	1
@@ -56,7 +53,14 @@ LOG_MODULE_REGISTER(magcard_main, LOG_LEVEL_DBG);
 
 #define RM3100_DEMO_SLEEP_TIME_MS 1000
 
-#undef DEV_MAG_ZEPHYR_ENABLE_MAGB
+#define DEV_MAG_ZEPHYR_ENABLE_MAGB
+
+/* === GPIO data === */
+#define BP_NODE DT_NODELABEL(maggpios)
+
+static const struct gpio_dt_spec n_mag_en = GPIO_DT_SPEC_GET(BP_NODE, n_mag_en_gpios);
+static const struct gpio_dt_spec n_mag_fault = GPIO_DT_SPEC_GET(BP_NODE, n_mag_fault_gpios);
+static const struct gpio_dt_spec mag_ready = GPIO_DT_SPEC_GET(BP_NODE, mag_ready_gpios);
 
 #define MAG_THREAD_STACK_SIZE 2048
 #define MAG_THREAD_PRIORITY 0
@@ -66,13 +70,33 @@ extern const k_tid_t mag_id;
 // - SECTION - routines
 //----------------------------------------------------------------------
 
+static int gpios_init(void)
+{
+    int ret;
+
+    ret = gpio_pin_configure_dt(&n_mag_en, GPIO_OUTPUT);
+    if (ret) {
+        return ret;
+    }
+    ret = gpio_pin_configure_dt(&n_mag_fault, GPIO_INPUT);
+    if (ret) {
+        return ret;
+    }
+    ret = gpio_pin_configure_dt(&mag_ready, GPIO_INPUT);
+    if (ret) {
+        return ret;
+    }
+
+    return ret;
+}
+
 static const struct device *check_rm3100_sensor(const struct device *rm3100_dev)
 {
 	if (rm3100_dev == NULL) {
 		/* No such node, or the node does not have status "okay". */
 		LOG_ERR("\nError: no device found.");
 		return NULL;
-		}
+	}
 
 	if (!device_is_ready(rm3100_dev)) {
 		LOG_ERR("\nError: Device \"%s\" is not ready; "
@@ -108,6 +132,19 @@ const struct device *const rm3100b_dev = DEVICE_DT_GET(MAG1_NODE);
 
 int init_mag(void)
 {
+	LOG_INF("Initializing magnetometers");
+	if (!gpios_init()) {
+		LOG_ERR("Unable to initialize magnetometer gpio pins");
+	}
+	k_msleep(1000);
+	LOG_INF("Turning on mag power");
+	k_msleep(10);
+	gpio_pin_set_dt(&n_mag_en, 0); // enable the MAX892 mag power switch and breaker
+	k_msleep(10);
+	if (!gpio_pin_get_dt(&n_mag_fault)) {
+		LOG_WRN("Enabled MAX892 mag power, but got a fault");
+	}
+
 	if (check_rm3100_sensor(rm3100a_dev) == NULL) {
 		LOG_ERR("Could not find RM3100 magnetometer instance 'a'");
 		return -ENODEV;
@@ -145,6 +182,10 @@ static void handle_mag(void *p1, void *p2, void *p3)
 	int32_t rc = 0;
 
 	while (true) {
+		if (!gpio_pin_get_dt(&n_mag_fault)) {
+			LOG_WRN("MAX892 mag power fault!");
+		}
+
 		rc = sensor_read(&iodev, &ctx, buf, 128);
 		if (rc != 0) {
 				LOG_ERR("%s: sensor_read() failed: %d", rm3100a_dev->name, rc);

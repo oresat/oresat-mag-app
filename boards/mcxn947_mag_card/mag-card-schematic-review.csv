@@ -1,7 +1,7 @@
 label,pin,dir,type,note
-P4_20,41,out,GPIO,MAG_READY
+P4_20,41,in,GPIO,MAG_READY
 P4_19,40,in,GPIO,/MAG_FAULT
-P4_17,39,in,GPIO,/MAG_EN
+P4_17,39,out,GPIO,/MAG_EN
 P4_16,38,in,GPIO,MT_EN
 P4_13,36,in/out (open drain),GPIO,MT_EN/FAULT
 P4_12,35,in,GPIO,MT_STBY/RST

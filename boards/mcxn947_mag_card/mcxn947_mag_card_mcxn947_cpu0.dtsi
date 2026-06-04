@@ -61,10 +61,9 @@
 
 	maggpios: mag-gpios {
 		compatible = "mag-card";
-		tp84-p0-3-gpios = <&gpio0 3 GPIO_PULL_DOWN>;
-		tp85-p0-4-gpios = <&gpio0 4 GPIO_PULL_DOWN>;
-		tp86-p0-5-gpios = <&gpio0 5 GPIO_PULL_DOWN>;
-		tp78-p0-18-gpios = <&gpio0 18 GPIO_PULL_DOWN>;
+   	n-mag-en-gpios = <&gpio4 17 GPIO_ACTIVE_HIGH>; /* disable magnetometer power at start */
+   	n-mag-fault-gpios = <&gpio4 19 0>;
+   	mag-ready-gpios = <&gpio4 20 0>;
 	};
 
 	zephyr,user {
