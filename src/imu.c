@@ -46,6 +46,8 @@ LOG_MODULE_REGISTER(imu, CONFIG_LOG_DEFAULT_LEVEL);
 #define IMU_DEVICE_ADDR_ALT 0x69 // I2C 7 bit address
 
 #define SOFT_RESET_RETRIES 10
+#define SOFT_RESET_READY_TRIES 100
+#define DATA_READY_TRIES 500
 #define HIST_SIZE 10
 
 static const struct device *i2c;
@@ -120,6 +122,45 @@ static int imu_read_reg(uint16_t full_addr, uint8_t *buf)
 	return ret;
 }
 
+static int reset_imu(void)
+{
+	int ret;
+	int attempt;
+	uint8_t int_status;
+
+	for (attempt = 1; attempt < SOFT_RESET_RETRIES; attempt++) {
+		ret = imu_write_reg(REG_DEVICE_CONFIG, BIT_SOFT_RESET_CONFIG);
+		k_msleep(1); /* must sleep 1ms before any other register access */
+		if (ret < 0) {
+			LOG_ERR("Attempt %d: error soft resetting IMU: %d", attempt++, ret);
+		} else {
+			LOG_INF("Soft reset the IMU...");
+		}
+		for (int i = 0; i < SOFT_RESET_READY_TRIES; i++) {
+			ret = imu_read_reg(REG_INT_STATUS, &int_status);
+			if (ret < 0) {
+				LOG_ERR("Error reading int status: %d", ret);
+			} else {
+				if (int_status & BIT_RESET_DONE_INT) {
+					LOG_INF("Soft reset complete.");
+					break;
+				}
+			}
+			k_msleep(1);
+		}
+		if (!ret && (int_status & BIT_RESET_DONE_INT)) {
+			break;
+			// TODO: test this, then add sync to data ready int
+		}
+	}
+
+	if (ret < 0) {
+		LOG_ERR("Giving up on soft reset of IMU.");
+	}
+
+	return ret;
+}
+
 static int init_imu(void)
 {
 	int ret;
@@ -154,36 +195,12 @@ static int init_imu(void)
 		return ret;
 	}
 
-	if (buf == WHO_AM_I_ICM42688) {
-		LOG_INF("IMU detected.");
-		return 0;
-	} else {
+	if (buf != WHO_AM_I_ICM42688) {
 		LOG_ERR("WHOAMI register returned 0x%02x, not 0x%02x", buf, WHO_AM_I_ICM42688);
 		return -ENXIO;
 	}
-}
-
-static int reset_imu(void)
-{
-	int ret;
-	int attempt;
-
-	for (attempt = 1; attempt < SOFT_RESET_RETRIES; attempt++) {
-		ret = imu_write_reg(REG_DEVICE_CONFIG, BIT_SOFT_RESET_CONFIG);
-		k_msleep(1); /* must sleep 1ms before any other register access */
-		if (ret < 0) {
-			LOG_ERR("Attempt %d: error soft resetting IMU: %d", attempt++, ret);
-		} else {
-			LOG_INF("Soft reset the IMU");
-			break;
-		}
-	}
-
-	if (ret < 0) {
-		LOG_ERR("Giving up on soft reset of IMU.");
-	}
-
-	return ret;
+	LOG_INF("IMU detected.");
+	return reset_imu();
 }
 
 /**
@@ -345,31 +362,31 @@ static int read_gyro_data(int16_t *x, int16_t *y, int16_t *z)
 	}
 	ret = imu_read_reg(REG_GYRO_DATA_X1, &b1);
 	if (ret < 0) {
-		LOG_ERR("Error reading X0: %d", ret);
+		LOG_ERR("Error reading X1: %d", ret);
 		return ret;
 	}
 	*x = b0 | ((uint16_t)b1 << 8);
 
 	ret = imu_read_reg(REG_GYRO_DATA_Y0, &b0);
 	if (ret < 0) {
-		LOG_ERR("Error reading X0: %d", ret);
+		LOG_ERR("Error reading Y0: %d", ret);
 		return ret;
 	}
 	ret = imu_read_reg(REG_GYRO_DATA_Y1, &b1);
 	if (ret < 0) {
-		LOG_ERR("Error reading X0: %d", ret);
+		LOG_ERR("Error reading Y1: %d", ret);
 		return ret;
 	}
 	*y = b0 | ((uint16_t)b1 << 8);
 
 	ret = imu_read_reg(REG_GYRO_DATA_Z0, &b0);
 	if (ret < 0) {
-		LOG_ERR("Error reading X0: %d", ret);
+		LOG_ERR("Error reading Z0: %d", ret);
 		return ret;
 	}
 	ret = imu_read_reg(REG_GYRO_DATA_Z1, &b1);
 	if (ret < 0) {
-		LOG_ERR("Error reading X0: %d", ret);
+		LOG_ERR("Error reading Z1: %d", ret);
 		return ret;
 	}
 	*z = b0 | ((uint16_t)b1 << 8);
@@ -377,47 +394,81 @@ static int read_gyro_data(int16_t *x, int16_t *y, int16_t *z)
 	return ret;
 }
 
-
-static int process_gyro_data(int16_t *x, int16_t *y, int16_t *z)
+static int read_temp_data(int16_t *temp)
 {
-	static int hist_depth = 0;
-	static int16_t x_hist[HIST_SIZE + 1] = {0};
-	static int16_t y_hist[HIST_SIZE + 1] = {0};
-	static int16_t z_hist[HIST_SIZE + 1] = {0};
-	int err;
+	int ret;
+	uint8_t b0;
+	uint8_t b1;
+
+	ret = imu_read_reg(REG_TEMP_DATA0, &b0);
+	if (ret < 0) {
+		LOG_ERR("Error reading TEMP0: %d", ret);
+		return ret;
+	}
+	ret = imu_read_reg(REG_TEMP_DATA1, &b1);
+	if (ret < 0) {
+		LOG_ERR("Error reading TEMP1: %d", ret);
+		return ret;
+	}
+	*temp = b0 | ((uint16_t)b1 << 8);
+	return ret;
+}
+
+typedef struct {
+	int16_t hist[HIST_SIZE + 1];
+	int depth;
+} hist_store;
+
+static hist_store x_hist;
+static hist_store y_hist;
+static hist_store z_hist;
+static hist_store temp_hist;
+
+static void process_datum(hist_store *hist_sp, int16_t new_datum, int16_t *ave_data)
+{
 	int i;
 
 	// throw out oldest sample
-	for (i = MIN(HIST_SIZE - 1, hist_depth - 1); i > 0; i--) {
-		x_hist[i + 1] = x_hist[i];
-		y_hist[i + 1] = y_hist[i];
-		z_hist[i + 1] = z_hist[i];
+	for (i = MIN(HIST_SIZE - 1, hist_sp->depth - 1); i > 0; i--) {
+		hist_sp->hist[i + 1] = hist_sp->hist[i];
 	}
 
-	err = read_gyro_data(&x_hist[0], &y_hist[0], &z_hist[0]);
+	hist_sp->hist[0] = new_datum;
+
+	hist_sp->depth++;
+	if (hist_sp->depth > HIST_SIZE) {
+		hist_sp->depth = HIST_SIZE;
+	}
+
+	int32_t sum = 0;
+
+	for (i = 0; i < hist_sp->depth; i++) {
+		sum += hist_sp->hist[i];
+	}
+	*ave_data = (sum / hist_sp->depth);
+}
+
+static int process_data(int16_t *x, int16_t *y, int16_t *z, int16_t *temp)
+{
+	int err;
+	int16_t new_x;
+	int16_t new_y;
+	int16_t new_z;
+	int16_t new_temp;
+
+	err = read_gyro_data(&new_x, &new_y, &new_z);
 	if (err < 0) {
 		return err;
 	}
+	process_datum(&x_hist, new_x, x);
+	process_datum(&y_hist, new_y, y);
+	process_datum(&z_hist, new_z, z);
 
-	//LOG_DBG("Raw gyro: (%d, %d, %d)", x_hist[0], y_hist[0], z_hist[0]);
-
-	hist_depth++;
-	if (hist_depth > HIST_SIZE) {
-		hist_depth = HIST_SIZE;
+	err = read_temp_data(&new_temp);
+	if (err < 0) {
+		return err;
 	}
-
-	int32_t sum_x = 0;
-	int32_t sum_y = 0;
-	int32_t sum_z = 0;
-
-	for (i = 0; i < hist_depth; i++) {
-		sum_x += x_hist[i];
-		sum_y += y_hist[i];
-		sum_z += z_hist[i];
-	}
-	*x = (sum_x / hist_depth);
-	*y = (sum_y / hist_depth);
-	*z = (sum_z / hist_depth);
+	process_datum(&temp_hist, new_temp, temp);
 
 	return 0;
 }
@@ -443,18 +494,35 @@ static void handle_imu(void *p1, void *p2, void *p3)
 	int16_t x = 0;
 	int16_t y = 0;
 	int16_t z = 0;
+	int16_t temp = 0;
 	int count = 0;
+	int i;
+	uint8_t int_status;
 
 	for (;;) {
-		err = process_gyro_data(&x, &y, &z);
+		for (i = 0; i < DATA_READY_TRIES; i++) {
+			err = imu_read_reg(REG_INT_STATUS, &int_status);
+			if (!err && (int_status & BIT_DATA_RDY_INT)) {
+				break;
+			}
+			k_sleep(K_MSEC(1));
+		}
+		if (err) {
+			LOG_ERR("Timeout waiting for data ready");
+		}
+		err = process_data(&x, &y, &z, &temp);
+
+		// Temperature in Degrees Centigrade = (TEMP_DATA / 132.48) + 25
+		int16_t temp_decicentigrade = (int16_t)(((int)temp * 100) / (1325) + 250);
 		if (!err) {
 			count++;
 			if (count >= HIST_SIZE) {
 				count = 0;
 				LOG_INF("Ave gyro: (%d, %d, %d)", x, y, z);
+				LOG_INF("Ave temp (dC): %d", temp_decicentigrade);
 			}
 		}
-		k_sleep(K_MSEC(10));
+		k_sleep(K_MSEC(1));
 	}
 }
 

@@ -29,11 +29,7 @@
 #warning "- DEV 0315 - Node `rm3100` does not have status set to 'okay'"
 #endif
 
-// #if !DT_COMPAT_GET_ANY_STATUS_OKAY(pni_rm3100)
-// #warning "- DEV 0315 - No pni,rm3100 compatible node found in the device tree"
-// #endif
-
-LOG_MODULE_REGISTER(magcard_main, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(magnetometer, CONFIG_LOG_DEFAULT_LEVEL);
 
 #define N		(8)
 #define M		(N/2)
@@ -246,8 +242,7 @@ static void handle_mag(void *p1, void *p2, void *p3)
 		// See zephyr/include/zephyr/drivers/sensor_data_types.h
 		// for `.value`, `.temperature`, `.humidity` and similar as
 		// they appear as members of the `readings` array:
-		LOG_INF("RM3100 'a' readings (iter %u):  mag0_x %s%d.%d mag0_y %s%d.%d mag0_z %s%d.%d",
-			loop_count,
+		LOG_INF("a: (%s%d.%d, %s%d.%d, %s%d.%d)",
 			PRIq_arg(mag_x_data.readings[0].value, 6, mag_x_data.shift),
 			PRIq_arg(mag_y_data.readings[0].value, 6, mag_y_data.shift),
 			PRIq_arg(mag_z_data.readings[0].value, 6, mag_z_data.shift));
@@ -262,10 +257,6 @@ static void handle_mag(void *p1, void *p2, void *p3)
 				LOG_ERR("%s: sensor_read() for mag1 failed, err %d", rm3100b_dev->name, rc);
 				break;
 		}
-
-	// QUESTION: can we reuse 'decoder'?
-	// ANSWER:  readings using original decoder are from mag0, not
-	//  		mag1 so looks like we need a distinct 'decoder':
 
 		const struct sensor_decoder_api *decoder_b;
 
@@ -291,15 +282,11 @@ static void handle_mag(void *p1, void *p2, void *p3)
 		decoder_b->decode(buf_b, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_Z, 0},
 										&mag1_z_fit, 1, &mag1_z_data);
 
-		LOG_INF("RM3100 'b' readings (     %u):  mag1_x %s%d.%d mag1_y %s%d.%d mag1_z %s%d.%d",
-			loop_count,
+		LOG_INF("b: (%s%d.%d, %s%d.%d, %s%d.%d)",
 			PRIq_arg(mag1_x_data.readings[0].value, 6, mag1_x_data.shift),
 			PRIq_arg(mag1_y_data.readings[0].value, 6, mag1_y_data.shift),
 			PRIq_arg(mag1_z_data.readings[0].value, 6, mag1_z_data.shift));
 #endif
-
-		LOG_INF("---");
-
 		k_msleep(RM3100_DEMO_SLEEP_TIME_MS);
 		loop_count++;
 	}
