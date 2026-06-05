@@ -380,18 +380,18 @@ static int read_gyro_data(int16_t *x, int16_t *y, int16_t *z)
 
 static int process_gyro_data(int16_t *x, int16_t *y, int16_t *z)
 {
-	static int16_t x_hist[HIST_SIZE];
-	static int16_t y_hist[HIST_SIZE];
-	static int16_t z_hist[HIST_SIZE];
-	static int hist_depth;
+	static int hist_depth = 0;
+	static int16_t x_hist[HIST_SIZE + 1] = {0};
+	static int16_t y_hist[HIST_SIZE + 1] = {0};
+	static int16_t z_hist[HIST_SIZE + 1] = {0};
 	int err;
 	int i;
 
 	// throw out oldest sample
-	for (i = 0; i < HIST_SIZE - 1; i++) {
-		x_hist[i] = x_hist[i+1];
-		y_hist[i] = y_hist[i+1];
-		z_hist[i] = z_hist[i+1];
+	for (i = MIN(HIST_SIZE - 1, hist_depth - 1); i > 0; i--) {
+		x_hist[i + 1] = x_hist[i];
+		y_hist[i + 1] = y_hist[i];
+		z_hist[i + 1] = z_hist[i];
 	}
 
 	err = read_gyro_data(&x_hist[0], &y_hist[0], &z_hist[0]);
@@ -401,8 +401,9 @@ static int process_gyro_data(int16_t *x, int16_t *y, int16_t *z)
 
 	//LOG_DBG("Raw gyro: (%d, %d, %d)", x_hist[0], y_hist[0], z_hist[0]);
 
-	if (hist_depth < HIST_SIZE) {
-		hist_depth++;
+	hist_depth++;
+	if (hist_depth > HIST_SIZE) {
+		hist_depth = HIST_SIZE;
 	}
 
 	int32_t sum_x = 0;
