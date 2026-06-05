@@ -105,7 +105,7 @@ static const struct device *check_rm3100_sensor(const struct device *rm3100_dev)
 		return NULL;
 	}
 
-	LOG_INF("Found device \"%s\", getting sensor data", rm3100_dev->name);
+	LOG_INF("Found device \"%s\"", rm3100_dev->name);
 	return rm3100_dev;
 }
 
@@ -171,9 +171,9 @@ int init_mag(void)
 	}
 
 #ifdef DEV_MAG_ZEPHYR_ENABLE_MAGB
-	ret = device_init(rm3100a_dev);
+	ret = device_init(rm3100b_dev);
 	if (ret < 0) {
-		LOG_ERR("Error initializing rm3100a device driver: %d", ret);
+		LOG_ERR("Error initializing rm3100b device driver: %d", ret);
 		return ret;
 	}
 	if (check_rm3100_sensor(rm3100b_dev) == NULL) {
