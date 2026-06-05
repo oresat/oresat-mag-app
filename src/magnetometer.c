@@ -133,21 +133,27 @@ const struct device *const rm3100b_dev = DEVICE_DT_GET(MAG1_NODE);
 int init_mag(void)
 {
 	int ret;
+	uint32_t count = 1;
 
-	k_msleep(3000);
+	k_msleep(500);
 	LOG_INF("Initializing magnetometers");
 	ret = gpios_init();
 	if (ret < 0) {
 		LOG_ERR("Unable to initialize magnetometer gpio pins: %d", ret);
 		return -ENODEV;
 	}
-	k_msleep(1000);
-	LOG_INF("Turning on mag power");
-	k_msleep(10);
-	gpio_pin_set_dt(&n_mag_en, 1); // enable the MAX892 mag power switch and breaker
-	k_msleep(10);
-	if (!gpio_pin_get_dt(&n_mag_fault)) {
-		LOG_WRN("Enabled MAX892 mag power, but got a fault");
+
+	for (;;) {
+		k_msleep(500);
+		LOG_INF("Turning on mag power");
+		k_msleep(10);
+		gpio_pin_set_dt(&n_mag_en, 1); // enable the MAX892 mag power switch and breaker
+		k_msleep(100);
+		if (!gpio_pin_get_dt(&n_mag_fault)) {
+			LOG_WRN("Enabled MAX892 mag power, but got a fault. Retry %u", count++);
+		} else {
+			break;
+		}
 	}
 
 	// We use deferred initialization in the device tree so we can wait until
