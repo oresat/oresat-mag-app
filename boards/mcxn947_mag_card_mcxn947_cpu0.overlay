@@ -10,6 +10,7 @@
                 mag0 = &rm3100a;
                 mag1 = &rm3100b;
 		/* imu1 = &icm42688_1; */
+		imu1 = &icm42688_1;
         };
 };
 
@@ -28,8 +29,6 @@
                 odr = <RM3100_DT_ODR_600>;
                 status = "okay";
         };
-
-/*
         icm42688_1: icm42688p1@d0 {
 		compatible = "invensense,icm42688";
 		reg = <0xd0>;
@@ -46,5 +45,4 @@
                 axis-align-z = <SENSOR_AXIS_ALIGN_DT_Z>;
                 status = "okay";
 	};
-*/
 };
