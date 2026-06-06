@@ -30,7 +30,7 @@
                 status = "okay";
         };
         icm42688_1: icm42688p1@d0 {
-		compatible = "invensense,icm42688";
+		compatible = "oresat,icm42688";
 		reg = <0xd0>;
 		int-gpios = <&gpio2 0 GPIO_ACTIVE_HIGH>;
 		int-gpios = <&gpio2 1 GPIO_ACTIVE_HIGH>;
