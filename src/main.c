@@ -22,7 +22,7 @@
 #warning "- DEV 0315 - No `rm3100` node found with status 'okay'"
 #endif
 
-#if !DT_HAS_COMPAT_STATUS_OKAY(invensense_icm42688)
+#if !DT_HAS_COMPAT_STATUS_OKAY(oresat_icm42688)
 #warning "- DEV 0531 - No `icm42688` node found with status 'okay'"
 #endif
 
