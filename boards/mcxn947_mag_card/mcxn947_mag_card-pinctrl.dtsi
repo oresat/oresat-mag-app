@@ -56,36 +56,39 @@
 		};
 	};
 
-	pinmux_flexpwm1_pwm0: pinmux_flexpwm1_pwm0 {
-		group0 {
-			pinmux = <PWM1_A0_PIO2_6>,
-				<PWM1_B0_PIO2_7>;
-			slew-rate = "fast";
-			drive-strength = "low";
-		};
-	};
-
-	pinmux_flexpwm1_pwm1: pinmux_flexpwm1_pwm1 {
-		group0 {
-			pinmux = <PWM1_B1_PIO2_5>;
-			slew-rate = "fast";
-			drive-strength = "low";
-		};
-	};
-
+/* MT_Z_I_SENSE, MT_Y_I_SENSE */
 	pinmux_lpadc0: pinmux_lpadc0 {
 		group0 {
 			pinmux = <ADC0_A0_PIO4_0>,
-				<ADC0_B0_PIO4_1>;
+					 <ADC0_B0_PIO4_1>;
 			slew-rate = "fast";
 			drive-strength = "low";
 		};
 	};
 
+/* MT_X_I_SENSE */
 	pinmux_lpadc1: pinmux_lpadc1 {
 		group0 {
-			pinmux = <ADC1_A0_PIO4_4>,
-				<ADC1_B4_PIO4_3>;
+			pinmux = <ADC1_A0_PIO4_4>;
+			slew-rate = "fast";
+			drive-strength = "low";
+		};
+	};
+
+/* MT_X_PWM, MT_Y PWM */
+	pinmux_flexpwm1_pwm0: pinmux_flexpwm1_pwm0 {
+		group0 {
+			pinmux = <PWM1_B0_PIO2_7>,
+			<PWM1_A0_PIO2_6>;
+			slew-rate = "fast";
+			drive-strength = "low";
+		};
+	};
+
+/* MT_Z_PWM */
+	pinmux_flexpwm1_pwm1: pinmux_flexpwm1_pwm1 {
+		group0 {
+			pinmux = <PWM1_B1_PIO2_5>;
 			slew-rate = "fast";
 			drive-strength = "low";
 		};

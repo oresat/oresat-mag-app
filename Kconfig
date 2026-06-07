@@ -2,6 +2,44 @@
 
 menu "Oresat MCXN947 Mag Card"
 
+	config DAC_INTF
+		bool "Enable DAC output."
+		select DAC
+		help
+		  Enable use of DAC.
+
+	config ADC_INTF
+		bool "Enable monitoring one or more ADC channels."
+		select ADC
+		select DMA
+		select ADC_STM32 if SOC_STM32F091XC
+		select ADC_STM32_DMA if SOC_STM32F091XC
+		select DMA_STM32 if SOC_STM32F091XC
+		help
+		  Outputs the data scaled to mV.
+
+	if ADC_INTF
+
+		config SEQUENCE_SAMPLES
+			int "Number of samples to be made on the sequence for each channel."
+			default 5
+
+		config SEQUENCE_RESOLUTION
+			int "Set the resolution of the sequence readings."
+			default 12
+
+		config SEQUENCE_32BITS_REGISTERS
+			bool "ADC data sequences are on 32bits"
+			default n
+
+	endif  # ADC_INTF
+
+config PWM_INTF
+	bool "Enable PWM output."
+	select PWM
+	help
+	  Enable use of PWMs.
+
 config BLINK
 	bool "Blink an LED"
 	default y
@@ -23,8 +61,12 @@ config IMU
 config MAG_TORQUERS
 	bool "Enable magetorquer control"
 	default y
+	select DAC_INTF
+	select ADC_INTF
+	select PWM_INTF
 	help
 	  Enable the driving the magnetorquers from CAN requests.
+
 
 config CAN_INTF
 	bool "Enable sending CAN packets."
@@ -49,6 +91,7 @@ config CAN_INTF
 			select STREAM_FLASH
 			select IMG_MANAGER
 			select MCUBOOT_GENERATE_CONFIRMED_IMAGE
+			select CANOPENNODE_PROGRAM_DOWNLOAD
 			help
 			  Define helper symbol CONFIG_MCUBOOT_ALLOWED for all supported
 			  architectures that have room for the required partitions in flash

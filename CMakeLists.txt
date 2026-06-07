@@ -11,6 +11,9 @@ project(oresat_mcxn947_mag)
 target_sources(app PRIVATE src/main.c)
 
 # Compile in various demos depending on Kconfig values.
+target_sources_ifdef(CONFIG_DAC_INTF     app PRIVATE src/dac.c)
+target_sources_ifdef(CONFIG_ADC_INTF     app PRIVATE src/adc.c)
+target_sources_ifdef(CONFIG_PWM_INTF     app PRIVATE src/pwm.c)
 target_sources_ifdef(CONFIG_BLINK        app PRIVATE src/blink.c)
 target_sources_ifdef(CONFIG_MAG          app PRIVATE src/magnetometer.c)
 target_sources_ifdef(CONFIG_IMU          app PRIVATE src/imu.c)

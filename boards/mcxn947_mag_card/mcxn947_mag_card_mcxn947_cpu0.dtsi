@@ -48,6 +48,8 @@
 		i2c-0 = &flexcomm0_lpi2c0;
 		mag0 = &rm3100a;
 		mag1 = &rm3100b;
+		pwm0 = &flexpwm1_pwm0;
+		pwm1 = &flexpwm1_pwm1;
 	};
 
 	leds {
@@ -61,9 +63,15 @@
 
 	maggpios: mag-gpios {
 		compatible = "mag-card";
-		n-mag-en-gpios = <&gpio4 17 0>;
-		n-mag-fault-gpios = <&gpio4 19 0>;
-		mag-ready-gpios = <&gpio4 20 0>;
+		mag-ready-gpios = <&gpio4 20 0>;	/* in */
+		n-mag-fault-gpios = <&gpio4 19 0>;	/* in */
+		n-mag-en-gpios = <&gpio4 17 0>;		/* out */
+		mt-en-gpios = <&gpio4 16 0>;		/* open drain out */
+		n-mt-en-fault-gpios = <&gpio4 13 0>;/* in */
+		n-mt-stby-rst-gpios = <&gpio4 12 0>;/* out */
+		mt-z-phase-gpios = <&gpio4 7 0>;	/* out */
+		mt-y-phase-gpios = <&gpio4 6 0>;	/* out */
+		mt-x-phase-gpios = <&gpio4 5 0>;	/* out */
 	};
 
 	zephyr,user {
@@ -243,6 +251,13 @@
 	status = "disabled";
 };
 
+&flexpwm1_pwm0 {
+	pinctrl-0 = <&pinmux_flexpwm1_pwm0>,
+		<&pinmux_flexpwm1_pwm1>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
 &flexpwm1_pwm1 {
 	pinctrl-0 = <&pinmux_flexpwm1_pwm1>;
 	pinctrl-names = "default";
@@ -298,17 +313,6 @@
 		zephyr,resolution = <12>;
 		zephyr,oversampling = <5>;
 		zephyr,input-positive = <MCUX_LPADC_CH0A>;
-		/delete-property/ zephyr,differential;
-	};
-	lpadc1_1: channel@1 {
-		reg = <1>;
-		zephyr,gain = "ADC_GAIN_1";
-		zephyr,reference = "ADC_REF_EXTERNAL0";
-		zephyr,vref-mv = <3300>;
-		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS,2)>;
-		zephyr,resolution = <12>;
-		zephyr,oversampling = <5>;
-		zephyr,input-positive = <MCUX_LPADC_CH4B>;
 		/delete-property/ zephyr,differential;
 	};
 };

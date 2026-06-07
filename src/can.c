@@ -24,6 +24,24 @@ LOG_MODULE_REGISTER(can_thread, LOG_LEVEL_DBG);
 #define CAN_THREAD_PRIORITY 0
 extern const k_tid_t can_id;
 
+#if 0
+
+// FROM CHIBIOS CODE:
+
+void CO_errorReportRateLimited(CO_EM_t *em, const uint8_t errorBit, uint16_t errorCode, uint32_t infoCode, systime_t *last_error_time) {
+
+	const systime_t now_time = chVTGetSystemTime();
+	if( chTimeDiffX(*last_error_time, now_time) < 10000 ) {
+		return;
+	}
+	*last_error_time = now_time;
+
+	CO_errorReport(em, errorBit, errorCode, infoCode);
+}
+
+
+#endif
+
 static bool run_self_tests(void)
 {
 	LOG_INF("Running system self-tests...");

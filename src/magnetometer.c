@@ -19,16 +19,6 @@
 
 #include <stdio.h>
 
-#ifndef DT_HAS_COMPAT_STATUS_OKAY
-#warning "- DEV 0315 - macro `DT_HAS_COMPAT_STATUS_OKAY` not defined"
-#else
-#warning "- DEV 0315 - about to use `DT_HAS_COMPAT_STATUS_OKAY` . . ."
-#endif 
-
-#if !DT_HAS_COMPAT_STATUS_OKAY(pni_rm3100)
-#warning "- DEV 0315 - Node `rm3100` does not have status set to 'okay'"
-#endif
-
 LOG_MODULE_REGISTER(magnetometer, CONFIG_LOG_DEFAULT_LEVEL);
 
 #define N		(8)
@@ -61,6 +51,62 @@ static const struct gpio_dt_spec mag_ready = GPIO_DT_SPEC_GET(BP_NODE, mag_ready
 #define MAG_THREAD_STACK_SIZE 2048
 #define MAG_THREAD_PRIORITY 0
 extern const k_tid_t mag_id;
+
+#if 0
+// FROM CHIBIOS CODE:
+typedef enum {
+	EC_MAG_0_MZ_1 = 0,
+	EC_MAG_1_MZ_2,
+	EC_MAG_2_PZ_1,
+	EC_MAG_3_PZ_2,
+	EC_MAG_NONE,
+} end_card_magnetometoer_t;
+
+
+static const I2CConfig mmc5983ma_i2ccfg = {
+    STM32_TIMINGR_PRESC(0xBU) |
+    STM32_TIMINGR_SCLDEL(0x4U) | STM32_TIMINGR_SDADEL(0x2U) |
+    STM32_TIMINGR_SCLH(0xFU)  | STM32_TIMINGR_SCLL(0x13U),
+    0,
+    0
+};
+
+static const MMC5983MAConfig mmc5983ma_generic_config = {
+	.i2cp = &I2CD1,
+	.i2ccfg = &mmc5983ma_i2ccfg
+};
+
+
+typedef struct {
+	MMC5983MADriver driver;
+	mmc5983ma_data_t data;
+	volatile bool is_initialized;
+	volatile bool is_working;
+} magnetometer_data_struct_t;
+
+typedef struct  {
+	bmi088_accelerometer_sample_t accl_data;
+	bmi088_gyro_sample_t gyro_sample;
+	int16_t temp_c;
+
+	mt_pwm_phase_data_t mt_pwm_data[3];
+
+	magnetometer_data_struct_t magetometer_data[4];
+} adcs_data_t;
+
+
+adcs_data_t g_adcs_data;
+
+static const BMI088Config imucfg = {
+    .i2cp = &I2CD1,
+    .i2ccfg = &i2ccfg,
+    .gyro_saddr = BMI088_GYRO_SADDR,
+    .acc_saddr = BMI088_ACC_SADDR,
+};
+
+static BMI088Driver imudev;
+
+#endif
 
 //----------------------------------------------------------------------
 // - SECTION - routines
