@@ -4,6 +4,8 @@
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/sys/util.h>
+#include <canopennode.h>
+#include <CO_OD.h>
 
 /**
  * From the mag requirements doc, which reigns supreme not this
@@ -42,7 +44,7 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(imu, CONFIG_LOG_DEFAULT_LEVEL);
 
-#define IMU_DEVICE_ADDR     0x68 // I2C 7 bit address
+#define IMU_DEVICE_ADDR 0x68 // I2C 7 bit address
 #define IMU_DEVICE_ADDR_ALT 0x69 // I2C 7 bit address
 
 #define SOFT_RESET_RETRIES 10
@@ -237,9 +239,9 @@ static int init_imu(void)
  *   else
  *     NF_COSWZ_SEL = 1
  *     if COSWZ > 0.875
- *       NF_COSWZ = round[8*(1-COSWZ)*256]
+ *  	 NF_COSWZ = round[8*(1-COSWZ)*256]
  *     else if COSWZ < 0.875
- *       NF_COSWZ = round[-8*(1+COSWZ)*256]
+ *  	 NF_COSWZ = round[-8*(1+COSWZ)*256]
  *     end
  *   End
  *
@@ -514,6 +516,15 @@ static void handle_imu(void *p1, void *p2, void *p3)
 
 		// Temperature in Degrees Centigrade = (TEMP_DATA / 132.48) + 25
 		int16_t temp_decicentigrade = (int16_t)(((int)temp * 100) / (1325) + 250);
+
+		// update CAN with new readings
+		CO_LOCK_OD();
+		CO_OD_RAM.gyroscope.pitch_rate_raw = x;
+		CO_OD_RAM.gyroscope.roll_rate_raw = y;
+		CO_OD_RAM.gyroscope.yaw_rate_raw = z;
+		CO_OD_RAM.temperature = (int8_t)(temp_decicentigrade / 10);
+		CO_UNLOCK_OD();
+
 		if (!err) {
 			count++;
 			if (count >= HIST_SIZE) {
