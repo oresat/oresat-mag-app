@@ -16,6 +16,8 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/rtio/rtio.h>
 #include <zephyr/logging/log.h>
+#include <canopennode.h>
+#include <CO_OD.h>
 
 #include <stdio.h>
 
@@ -39,7 +41,7 @@ LOG_MODULE_REGISTER(magnetometer, CONFIG_LOG_DEFAULT_LEVEL);
 
 #define RM3100_DEMO_SLEEP_TIME_MS 1000
 
-#define DEV_MAG_ZEPHYR_ENABLE_MAGB
+//#define DEV_MAG_ZEPHYR_ENABLE_MAGB
 
 /* === GPIO data === */
 #define BP_NODE DT_NODELABEL(maggpios)
@@ -267,31 +269,14 @@ static void handle_mag(void *p1, void *p2, void *p3)
 				break;
 		}
 
-		uint32_t mag_x_fit = 0;
-		struct sensor_q31_data mag_x_data = {0};
+		uint32_t mag_fit = 0;
+		struct sensor_three_axis_data mag0_data = {0};
 
-		decoder->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_X, 0},
-										&mag_x_fit, 1, &mag_x_data);
+		decoder->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_XYZ, 0},
+										&mag_fit, 1, &mag0_data);
 
-		uint32_t mag_y_fit = 0;
-		struct sensor_q31_data mag_y_data = {0};
-
-		decoder->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_Y, 0},
-										&mag_y_fit, 1, &mag_y_data);
-
-		uint32_t mag_z_fit = 0;
-		struct sensor_q31_data mag_z_data = {0};
-
-		decoder->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_Z, 0},
-										&mag_z_fit, 1, &mag_z_data);
-
-		// See zephyr/include/zephyr/drivers/sensor_data_types.h
-		// for `.value`, `.temperature`, `.humidity` and similar as
-		// they appear as members of the `readings` array:
-		LOG_INF("a: (%s%d.%d, %s%d.%d, %s%d.%d)",
-			PRIq_arg(mag_x_data.readings[0].value, 6, mag_x_data.shift),
-			PRIq_arg(mag_y_data.readings[0].value, 6, mag_y_data.shift),
-			PRIq_arg(mag_z_data.readings[0].value, 6, mag_z_data.shift));
+		LOG_INF(PRIsensor_three_axis_data,
+			PRIsensor_three_axis_data_arg(mag0_data, 0));
 
 //------------------------------------------------------
 // For magnetometer b:
@@ -312,27 +297,28 @@ static void handle_mag(void *p1, void *p2, void *p3)
 				break;
 		}
 
-		uint32_t mag1_x_fit = 0;
-		struct sensor_q31_data mag1_x_data = {0};
-		uint32_t mag1_y_fit = 0;
-		struct sensor_q31_data mag1_y_data = {0};
-		uint32_t mag1_z_fit = 0;
-		struct sensor_q31_data mag1_z_data = {0};
+		uint32_t mag1_fit = 0;
+		struct sensor_three_axis_data mag1_data = {0};
 
-		decoder_b->decode(buf_b, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_X, 0},
-										&mag1_x_fit, 1, &mag1_x_data);
+		decoder->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_XYZ, 0},
+										&mag_fit, 1, &mag1_data);
 
-		decoder_b->decode(buf_b, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_Y, 0},
-										&mag1_y_fit, 1, &mag1_y_data);
-
-		decoder_b->decode(buf_b, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_Z, 0},
-										&mag1_z_fit, 1, &mag1_z_data);
-
-		LOG_INF("b: (%s%d.%d, %s%d.%d, %s%d.%d)",
-			PRIq_arg(mag1_x_data.readings[0].value, 6, mag1_x_data.shift),
-			PRIq_arg(mag1_y_data.readings[0].value, 6, mag1_y_data.shift),
-			PRIq_arg(mag1_z_data.readings[0].value, 6, mag1_z_data.shift));
+		LOG_INF(PRIsensor_three_axis_data,
+			PRIsensor_three_axis_data_arg(mag1_data, 0));
 #endif
+
+		// update CAN with new readings
+		CO_LOCK_OD();
+		CO_OD_RAM.min_z_magnetometer_1.x = mag0_data.readings[0].x;
+		CO_OD_RAM.min_z_magnetometer_1.y = mag0_data.readings[0].y;
+		CO_OD_RAM.min_z_magnetometer_1.z = mag0_data.readings[0].z;
+#ifdef DEV_MAG_ZEPHYR_ENABLE_MAGB
+		CO_OD_RAM.min_z_magnetometer_2.x = mag1_data.readings[0].x;
+		CO_OD_RAM.min_z_magnetometer_2.y = mag1_data.readings[0].y;
+		CO_OD_RAM.min_z_magnetometer_2.z = mag1_data.readings[0].z;
+#endif
+		CO_UNLOCK_OD();
+
 		k_msleep(RM3100_DEMO_SLEEP_TIME_MS);
 		loop_count++;
 	}

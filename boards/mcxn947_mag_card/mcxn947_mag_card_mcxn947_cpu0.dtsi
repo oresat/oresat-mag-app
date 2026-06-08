@@ -226,15 +226,15 @@
 };
 
 &lptmr0 {
-	status = "okay";
+	status = "disabled";
 };
 
 &flexio0 {
-	status = "okay";
+	status = "disabled";
 };
 
 &mrt0_channel0 {
-	status = "okay";
+	status = "disabled";
 };
 
 &rtc {
@@ -244,7 +244,7 @@
 &sc_timer {
 	pinctrl-0 = <&pinmux_sctimer>;
 	pinctrl-names = "default";
-	status = "okay";
+	status = "disabled";
 };
 
 &enet {

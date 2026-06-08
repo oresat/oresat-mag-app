@@ -16,14 +16,6 @@
 
 LOG_MODULE_REGISTER(oresat_pwm, LOG_LEVEL_DBG);
 
-/* PWM node from the devicetree. */
-#define PWM_NODE_0 DT_ALIAS(pwm0)
-#define PWM_NODE_1 DT_ALIAS(pwm1)
-
-#define PWM_FREQUENCY 2500U
-#define PERCENT_SCALE 10000U
-
-
 /**
  * @brief   Converts from fraction to pulse width.
  * @note    Be careful with rounding errors, this is integer math not magic.
@@ -58,6 +50,13 @@ LOG_MODULE_REGISTER(oresat_pwm, LOG_LEVEL_DBG);
 #define PWM_PERCENTAGE_TO_WIDTH(period, percentage) \
 	PWM_FRACTION_TO_WIDTH(period, PERCENT_SCALE, percentage)
 
+/* PWM node from the devicetree. */
+#define PWM_NODE_0 DT_ALIAS(pwm0)
+#define PWM_NODE_1 DT_ALIAS(pwm1)
+
+#define PWM_FREQUENCY 2500U
+#define PERCENT_SCALE 10000U
+
 typedef struct pwm_info {
 	const struct device *dev;
 	int channel;
@@ -66,9 +65,9 @@ typedef struct pwm_info {
 } pwm_info;
 
 static pwm_info pwm_table[] = {
-	{DEVICE_DT_GET(PWM_NODE_0), 0}, // pwm_num = 0
-	{DEVICE_DT_GET(PWM_NODE_0), 1}, // pwm_num = 1
-	{DEVICE_DT_GET(PWM_NODE_1), 0}  // pwm_num = 2
+	{DEVICE_DT_GET(PWM_NODE_0), 1, 0, 0}, // pwm_num = 0
+	{DEVICE_DT_GET(PWM_NODE_0), 0, 0, 0}, // pwm_num = 1
+	{DEVICE_DT_GET(PWM_NODE_1), 1, 0, 0}  // pwm_num = 2
 };
 #define NUM_PWMS ARRAY_SIZE(pwm_table)
 
