@@ -252,8 +252,7 @@
 };
 
 &flexpwm1_pwm0 {
-	pinctrl-0 = <&pinmux_flexpwm1_pwm0>,
-		<&pinmux_flexpwm1_pwm1>;
+	pinctrl-0 = <&pinmux_flexpwm1_pwm0>;
 	pinctrl-names = "default";
 	status = "okay";
 };

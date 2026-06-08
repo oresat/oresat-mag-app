@@ -43,9 +43,9 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 	if (err) {
 		return 0;
 	}
-	err = set_pwm(0, 1000, 100);
-	err = set_pwm(1, 1000, 200);
-	err = set_pwm(2, 1000, 300);
+	err = set_pwm(0, 2500);
+	err = set_pwm(1, 5000);
+	err = set_pwm(2, 7500);
 
 	err = init_adc();
 	if (err) {
