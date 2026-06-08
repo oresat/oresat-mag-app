@@ -225,7 +225,8 @@ int acquire_adc_readings(void)
 	int i;
 	adc_dev_info *padi = adc_dev_infos;
 
-	for (i = 0; i < CHANNEL_COUNT; i++) {
+	for (i = 0; i < ADC_DEV_COUNT; i++) {
+		LOG_DBG("Requesting read from adc%d", i);
 		err = adc_read(padi->dev, &padi->sequence);
 		if (err < 0) {
 			LOG_ERR("Could not read (%d)", err);
