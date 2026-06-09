@@ -516,8 +516,6 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 {
 	int err;
 
-    i2c_recover_bus(DEVICE_DT_GET(DT_NODELABEL(flexcomm0_lpi2c0)));
-
 	k_thread_name_set(magtqr_id, "magtqr_thread");
 
 	LOG_INF("Starting MAGNETORQUER thread");

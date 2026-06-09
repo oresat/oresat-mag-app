@@ -57,6 +57,7 @@ LOG_MODULE_REGISTER(imu, LOG_LEVEL_INF);
 static const struct device *i2c;
 static uint8_t imu_addr;
 static uint8_t prev_bank;
+static bool imu_is_ready;
 
 #define IMU_THREAD_STACK_SIZE 2048
 #define IMU_THREAD_PRIORITY 0
@@ -131,6 +132,16 @@ static int imu_read_reg(uint16_t full_addr, uint8_t *buf)
 	return ret;
 }
 
+bool is_imu_ready(void)
+{
+	if (!imu_is_ready) {
+		char state_str[80] = {0};
+		k_thread_state_str(imu_id, state_str, sizeof(state_str) - 1);
+		LOG_ERR("IMU thread state: %s", state_str);
+	}
+	return imu_is_ready;
+}
+
 static int reset_imu(void)
 {
 	int ret;
@@ -139,9 +150,10 @@ static int reset_imu(void)
 
 	for (attempt = 1; attempt < SOFT_RESET_RETRIES; attempt++) {
 		ret = imu_write_reg(REG_DEVICE_CONFIG, BIT_SOFT_RESET_CONFIG);
-		k_msleep(1); /* must sleep 1ms before any other register access */
+		k_msleep(10); /* must sleep 1ms before any other register access */
 		if (ret < 0) {
 			LOG_ERR("Attempt %d: error soft resetting IMU: %d", attempt++, ret);
+			continue;
 		} else {
 			LOG_INF("Soft reset the IMU...");
 		}
@@ -155,16 +167,21 @@ static int reset_imu(void)
 					break;
 				}
 			}
-			k_msleep(1);
+			k_msleep(10);
 		}
 		if (!ret && (int_status & BIT_RESET_DONE_INT)) {
 			break;
 			// TODO: test this, then add sync to data ready int
 		}
+		ret = i2c_recover_bus(DEVICE_DT_GET(DT_NODELABEL(flexcomm0_lpi2c0)));
+		if (ret) {
+			LOG_WRN("I2C bus is stuck (err: %d); recovery failed", ret);
+		}
+		k_sleep(K_MSEC(10));
 	}
 
 	if (ret < 0) {
-		LOG_ERR("Giving up on soft reset of IMU.");
+		__ASSERT(ret < 0, "Giving up on soft reset of IMU. Rebooting.");
 	}
 
 	return ret;
@@ -174,6 +191,7 @@ static int init_imu(void)
 {
 	int ret;
 
+	imu_is_ready = false;
 	i2c = DEVICE_DT_GET(DT_NODELABEL(flexcomm0_lpi2c0)); //i2c-0));
 
 	if (!device_is_ready(i2c)) {
@@ -209,6 +227,7 @@ static int init_imu(void)
 		return -ENXIO;
 	}
 	LOG_INF("IMU detected.");
+	imu_is_ready = true;
 	return reset_imu();
 }
 
