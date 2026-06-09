@@ -5,5 +5,7 @@ int init_dac(void);
 
 int write_dac(uint16_t value);
 
+uint16_t get_dac_max_value(void);
+
 #endif
 

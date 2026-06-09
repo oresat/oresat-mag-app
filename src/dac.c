@@ -38,6 +38,8 @@ LOG_MODULE_REGISTER(oresat_dac, LOG_LEVEL_DBG);
 
 static const struct device *const dac_dev = DEVICE_DT_GET(DAC_NODE);
 
+static uint16_t max_dac_value = BIT(DAC_RESOLUTION) - 1;
+
 int init_dac(void)
 {
 	int ret;
@@ -51,7 +53,7 @@ int init_dac(void)
 	#endif /* CONFIG_DAC_BUFFER_NOT_SUPPORT */
 	};
 
-	LOG_INF("Initializing DAC");
+	LOG_INF("Initializing DAC for %u bit operation. Max value %u", DAC_RESOLUTION, max_dac_value);
 
 	/* Can we use the DAC? */
 	if (!device_is_ready(dac_dev)) {
@@ -80,3 +82,9 @@ int write_dac(uint16_t value)
 	}
 	return ret;
 }
+
+uint16_t get_dac_max_value(void)
+{
+	return max_dac_value;
+}
+

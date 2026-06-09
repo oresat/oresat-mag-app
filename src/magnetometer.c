@@ -19,7 +19,7 @@
 #include <canopennode.h>
 #include <CO_OD.h>
 
-#include <stdio.h>
+#include "magnetometer.h"
 
 LOG_MODULE_REGISTER(magnetometer, CONFIG_LOG_DEFAULT_LEVEL);
 
@@ -41,14 +41,14 @@ LOG_MODULE_REGISTER(magnetometer, CONFIG_LOG_DEFAULT_LEVEL);
 
 #define RM3100_DEMO_SLEEP_TIME_MS 1000
 
-//#define DEV_MAG_ZEPHYR_ENABLE_MAGB
-
 /* === GPIO data === */
 #define BP_NODE DT_NODELABEL(maggpios)
 
 static const struct gpio_dt_spec n_mag_en = GPIO_DT_SPEC_GET(BP_NODE, n_mag_en_gpios);
 static const struct gpio_dt_spec n_mag_fault = GPIO_DT_SPEC_GET(BP_NODE, n_mag_fault_gpios);
 static const struct gpio_dt_spec mag_ready = GPIO_DT_SPEC_GET(BP_NODE, mag_ready_gpios);
+
+static struct sensor_three_axis_data mag_data[NUM_MAGS];
 
 #define MAG_THREAD_STACK_SIZE 2048
 #define MAG_THREAD_PRIORITY 0
@@ -134,6 +134,16 @@ static int gpios_init(void)
     return ret;
 }
 
+static void stop_end_cap_magnetometers(void) {
+	//Disable power to the end cap magnetometers
+	gpio_pin_set_dt(&n_mag_en, false);
+}
+
+static void start_end_cap_magnetometers(void) {
+	gpio_pin_set_dt(&n_mag_en, true);
+	k_sleep(K_MSEC(10));
+}
+
 static const struct device *check_rm3100_sensor(const struct device *rm3100_dev)
 {
 	if (rm3100_dev == NULL) {
@@ -214,7 +224,7 @@ int init_mag(void)
 		ret = -ENODEV;
 	}
 
-#ifdef DEV_MAG_ZEPHYR_ENABLE_MAGB
+#if (NUM_MAGS > 1)
 	ret = device_init(rm3100b_dev);
 	if (ret < 0) {
 		LOG_ERR("Error initializing rm3100b device driver: %d", ret);
@@ -227,6 +237,19 @@ int init_mag(void)
 #endif
 
 	return ret;
+}
+
+int get_mag_reading(int mag_num, int32_t *x, int32_t *y, int32_t *z)
+{
+	if (mag_num >= NUM_MAGS) {
+		return -EINVAL; // we don't support that one yet
+	}
+
+	*x = mag_data[mag_num].readings[0].x;
+	*y = mag_data[mag_num].readings[0].y;
+	*z = mag_data[mag_num].readings[0].z;
+
+	return 0;
 }
 
 static void handle_mag(void *p1, void *p2, void *p3)
@@ -243,7 +266,7 @@ static void handle_mag(void *p1, void *p2, void *p3)
 	}
 
 	uint8_t buf[READINGS_BUFFER_SIZE] = {0};
-#ifdef DEV_MAG_ZEPHYR_ENABLE_MAGB
+#if (NUM_MAGS > 1)
 	uint8_t buf_b[READINGS_BUFFER_SIZE] = {0};
 #endif
 
@@ -270,19 +293,18 @@ static void handle_mag(void *p1, void *p2, void *p3)
 		}
 
 		uint32_t mag_fit = 0;
-		struct sensor_three_axis_data mag0_data = {0};
 
 		decoder->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_XYZ, 0},
-										&mag_fit, 1, &mag0_data);
+										&mag_fit, 1, &mag_data[0]);
 
 		LOG_INF(PRIsensor_three_axis_data,
-			PRIsensor_three_axis_data_arg(mag0_data, 0));
+			PRIsensor_three_axis_data_arg(mag_data[0], 0));
 
 //------------------------------------------------------
 // For magnetometer b:
 //------------------------------------------------------
 
-#ifdef DEV_MAG_ZEPHYR_ENABLE_MAGB
+#if (NUM_MAGS > 1)
 		rc = sensor_read(&iodev_b, &ctx_b, buf_b, 128);
 		if (rc != 0) {
 				LOG_ERR("%s: sensor_read() for mag1 failed, err %d", rm3100b_dev->name, rc);
@@ -298,26 +320,13 @@ static void handle_mag(void *p1, void *p2, void *p3)
 		}
 
 		uint32_t mag1_fit = 0;
-		struct sensor_three_axis_data mag1_data = {0};
 
 		decoder->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_XYZ, 0},
-										&mag_fit, 1, &mag1_data);
+										&mag_fit, 1, &mag_data[1]);
 
 		LOG_INF(PRIsensor_three_axis_data,
-			PRIsensor_three_axis_data_arg(mag1_data, 0));
+			PRIsensor_three_axis_data_arg(mag_data[1], 0));
 #endif
-
-		// update CAN with new readings
-		CO_LOCK_OD();
-		CO_OD_RAM.min_z_magnetometer_1.x = mag0_data.readings[0].x;
-		CO_OD_RAM.min_z_magnetometer_1.y = mag0_data.readings[0].y;
-		CO_OD_RAM.min_z_magnetometer_1.z = mag0_data.readings[0].z;
-#ifdef DEV_MAG_ZEPHYR_ENABLE_MAGB
-		CO_OD_RAM.min_z_magnetometer_2.x = mag1_data.readings[0].x;
-		CO_OD_RAM.min_z_magnetometer_2.y = mag1_data.readings[0].y;
-		CO_OD_RAM.min_z_magnetometer_2.z = mag1_data.readings[0].z;
-#endif
-		CO_UNLOCK_OD();
 
 		k_msleep(RM3100_DEMO_SLEEP_TIME_MS);
 		loop_count++;

@@ -7,10 +7,14 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/rtio/rtio.h>
 #include <zephyr/logging/log.h>
+#include <canopennode.h>
+#include <CO_OD.h>
 
 #include "dac.h"
 #include "pwm.h"
 #include "adc.h"
+#include "imu.h"
+#include "magnetometer.h"
 
 LOG_MODULE_REGISTER(magnetorquers, CONFIG_LOG_DEFAULT_LEVEL);
 
@@ -20,7 +24,434 @@ LOG_MODULE_REGISTER(magnetorquers, CONFIG_LOG_DEFAULT_LEVEL);
 /* scheduling priority used by each thread */
 #define PRIORITY 7
 
+#define ITERATION_PERIOD 5 // ms
+
 extern const k_tid_t magtqr_id;
+
+typedef struct {
+	int32_t current_pwm_percent; //0-10000
+	int32_t target_pwm_percent; //Negative values indicate the phase should be inverted
+
+	float current_feedback_measurement_V; //Volts, Note: this is the average voltage while the PWM output is high.
+	int32_t current_feedback_measurement_uA; //uA. Note: this is the average current flowing while the PWM output is high. It does not represent overall average current.
+
+	bool phase_state;
+	uint8_t phase_gpio_pin_number;
+	uint8_t pwm_channel_number;
+
+	int64_t last_update_time;
+} mt_pwm_phase_data_t;
+
+typedef struct {
+	int16_t x;
+	int16_t y;
+	int16_t z;
+	int16_t x_raw;
+	int16_t y_raw;
+	int16_t z_raw;
+} three_axis_data;
+
+typedef struct  {
+	mt_pwm_phase_data_t mt_pwm_data[3];
+	three_axis_data accl_data;
+	three_axis_data gyro_data;
+	int16_t temp_data;
+	three_axis_data magnetometer_data[4];
+} adcs_data_t;
+
+static adcs_data_t g_adcs_data;
+
+typedef enum {
+	EC_MAG_0_MZ_1 = 0,
+	EC_MAG_1_MZ_2,
+	EC_MAG_2_PZ_1,
+	EC_MAG_3_PZ_2,
+	EC_MAG_NONE,
+} end_card_magnetometer_t;
+
+/* === GPIO data === */
+#define BP_NODE DT_NODELABEL(maggpios)
+
+static const struct gpio_dt_spec mt_en = GPIO_DT_SPEC_GET(BP_NODE, mt_en_gpios);
+static const struct gpio_dt_spec n_mt_en_fault = GPIO_DT_SPEC_GET(BP_NODE, n_mt_en_fault_gpios);
+static const struct gpio_dt_spec n_mt_stby_rst = GPIO_DT_SPEC_GET(BP_NODE, n_mt_stby_rst_gpios);
+static const struct gpio_dt_spec mt_x_phase = GPIO_DT_SPEC_GET(BP_NODE, mt_x_phase_gpios);
+static const struct gpio_dt_spec mt_y_phase = GPIO_DT_SPEC_GET(BP_NODE, mt_y_phase_gpios);
+static const struct gpio_dt_spec mt_z_phase = GPIO_DT_SPEC_GET(BP_NODE, mt_z_phase_gpios);
+
+/**************************************************/
+
+static int init_gpios(void)
+{
+	int ret;
+
+	ret = gpio_pin_configure_dt(&mt_en, GPIO_OUTPUT_INACTIVE | GPIO_LINE_OPEN_DRAIN);
+	if (ret) {
+		return ret;
+	}
+	ret = gpio_pin_configure_dt(&n_mt_en_fault, GPIO_INPUT);
+	if (ret) {
+		return ret;
+	}
+	ret = gpio_pin_configure_dt(&n_mt_stby_rst, GPIO_OUTPUT_INACTIVE);
+	if (ret) {
+		return ret;
+	}
+	ret = gpio_pin_configure_dt(&mt_x_phase, GPIO_OUTPUT_INACTIVE);
+	if (ret) {
+		return ret;
+	}
+	ret = gpio_pin_configure_dt(&mt_y_phase, GPIO_OUTPUT_INACTIVE);
+	if (ret) {
+		return ret;
+	}
+	ret = gpio_pin_configure_dt(&mt_z_phase, GPIO_OUTPUT_INACTIVE);
+	if (ret) {
+		return ret;
+	}
+
+	return ret;
+}
+
+/**************************************************/
+
+static int32_t saturate_int32_t(const int32_t v, const int32_t min, const int32_t max) {
+	if (v >= max)
+		return (max);
+
+	else if (v <= min)
+		return (min);
+
+	return (v);
+}
+
+
+/**
+ * return value is in the range of 0 to 10000
+ */
+static int32_t map_current_uA_to_pwm_duty_cycle(const int32_t current_uA, const uint8_t axis) {
+	int32_t ret = 0;
+
+	if (axis <= 1) {
+		//X and Y axes
+		//1700 => 1000000 uA
+		//500 => 295000 uA (this is hard/impossible to measure using the ADC
+		ret = current_uA / (988000.0 / 1700.0);
+		const int32_t pwm_duty_max_value = 1700;
+		ret = saturate_int32_t(ret, -pwm_duty_max_value, pwm_duty_max_value);
+	} else {
+		//Z axis
+		//1700 => 344000 uA
+		//500 => 102000 uA  (this is hard/impossible to measure using the ADC
+		ret = current_uA / (344000.0 / 1700.0);
+		const int32_t pwm_duty_max_value = 4940;
+		ret = saturate_int32_t(ret, -pwm_duty_max_value, pwm_duty_max_value);
+	}
+
+	return(ret);
+}
+
+static int16_t raw_to_milligauss(int16_t raw)
+{
+		float gauss = 1000.0f * ((float) raw) / 4096.0f;
+		return (int16_t)gauss;
+}
+
+static void handle_can_open_data(void) {
+
+	g_adcs_data.mt_pwm_data[0].target_pwm_percent = map_current_uA_to_pwm_duty_cycle(CO_OD_RAM.magnetorquer.current_x_setpoint * 100, 0);
+	g_adcs_data.mt_pwm_data[1].target_pwm_percent = map_current_uA_to_pwm_duty_cycle(CO_OD_RAM.magnetorquer.current_y_setpoint * 100, 1);
+	g_adcs_data.mt_pwm_data[2].target_pwm_percent = map_current_uA_to_pwm_duty_cycle(CO_OD_RAM.magnetorquer.current_z_setpoint * 100, 2);
+
+	CO_OD_RAM.gyroscope.pitch_rate = g_adcs_data.gyro_data.x;
+	CO_OD_RAM.gyroscope.yaw_rate = g_adcs_data.gyro_data.y;
+	CO_OD_RAM.gyroscope.roll_rate = g_adcs_data.gyro_data.z;
+	CO_OD_RAM.gyroscope.pitch_rate_raw = g_adcs_data.gyro_data.x_raw;
+	CO_OD_RAM.gyroscope.yaw_rate_raw = g_adcs_data.gyro_data.y_raw;
+	CO_OD_RAM.gyroscope.roll_rate_raw = g_adcs_data.gyro_data.z_raw;
+
+	CO_OD_RAM.accelerometer.x = g_adcs_data.accl_data.x;
+	CO_OD_RAM.accelerometer.y = g_adcs_data.accl_data.y;
+	CO_OD_RAM.accelerometer.z = g_adcs_data.accl_data.z;
+	CO_OD_RAM.accelerometer.X_raw = g_adcs_data.accl_data.x_raw;
+	CO_OD_RAM.accelerometer.Y_raw = g_adcs_data.accl_data.y_raw;
+	CO_OD_RAM.accelerometer.Z_raw = g_adcs_data.accl_data.z_raw;
+
+	CO_OD_RAM.temperature = g_adcs_data.temp_data;
+
+	CO_OD_RAM.magnetorquer.current_x = g_adcs_data.mt_pwm_data[0].current_feedback_measurement_uA;
+	CO_OD_RAM.magnetorquer.current_y = g_adcs_data.mt_pwm_data[1].current_feedback_measurement_uA;
+	CO_OD_RAM.magnetorquer.current_z = g_adcs_data.mt_pwm_data[2].current_feedback_measurement_uA;
+
+	CO_OD_RAM.magnetorquer.pwm_x = g_adcs_data.mt_pwm_data[0].current_pwm_percent;
+	CO_OD_RAM.magnetorquer.pwm_y = g_adcs_data.mt_pwm_data[1].current_pwm_percent;
+	CO_OD_RAM.magnetorquer.pwm_z = g_adcs_data.mt_pwm_data[2].current_pwm_percent;
+
+	if (1) { //g_adcs_data.magetometer_data[EC_MAG_2_PZ_1].is_working) {
+		CO_OD_RAM.pos_z_magnetometer_1.x = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_2_PZ_1].x);
+		CO_OD_RAM.pos_z_magnetometer_1.y = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_2_PZ_1].y);
+		CO_OD_RAM.pos_z_magnetometer_1.z = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_2_PZ_1].z);
+	} else {
+		CO_OD_RAM.pos_z_magnetometer_1.x = INT16_MAX;
+		CO_OD_RAM.pos_z_magnetometer_1.y = INT16_MAX;
+		CO_OD_RAM.pos_z_magnetometer_1.z = INT16_MAX;
+	}
+
+	if (1) { //g_adcs_data.magetometer_data[EC_MAG_3_PZ_2].is_working) {
+		CO_OD_RAM.pos_z_magnetometer_2.x = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_3_PZ_2].x);
+		CO_OD_RAM.pos_z_magnetometer_2.y = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_3_PZ_2].y);
+		CO_OD_RAM.pos_z_magnetometer_2.z = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_3_PZ_2].z);
+	} else {
+		CO_OD_RAM.pos_z_magnetometer_2.x = INT16_MAX;
+		CO_OD_RAM.pos_z_magnetometer_2.y = INT16_MAX;
+		CO_OD_RAM.pos_z_magnetometer_2.z = INT16_MAX;
+	}
+
+	if (1) { //g_adcs_data.magetometer_data[EC_MAG_0_MZ_1].is_working) {
+		CO_OD_RAM.min_z_magnetometer_1.x = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_0_MZ_1].x);
+		CO_OD_RAM.min_z_magnetometer_1.y = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_0_MZ_1].y);
+		CO_OD_RAM.min_z_magnetometer_1.z = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_0_MZ_1].z);
+	} else {
+		CO_OD_RAM.min_z_magnetometer_1.x = INT16_MAX;
+		CO_OD_RAM.min_z_magnetometer_1.y = INT16_MAX;
+		CO_OD_RAM.min_z_magnetometer_1.z = INT16_MAX;
+	}
+
+	if (1) { //g_adcs_data.magetometer_data[EC_MAG_1_MZ_2].is_working) {
+		CO_OD_RAM.min_z_magnetometer_2.x = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_1_MZ_2].x);
+		CO_OD_RAM.min_z_magnetometer_2.y = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_1_MZ_2].y);
+		CO_OD_RAM.min_z_magnetometer_2.z = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_1_MZ_2].z);
+	} else {
+		CO_OD_RAM.min_z_magnetometer_2.x = INT16_MAX;
+		CO_OD_RAM.min_z_magnetometer_2.y = INT16_MAX;
+		CO_OD_RAM.min_z_magnetometer_2.z = INT16_MAX;
+	}
+}
+
+void print_debug_output(void) {
+	static int64_t last_print_time = 0;
+	int64_t now = k_uptime_get();
+
+	if ((now - last_print_time) > 750) {
+		last_print_time = now;
+
+		LOG_DBG( "================");
+		LOG_DBG( "CANOpen Data:");
+		LOG_DBG( "  CO_OD_RAM.gyroscope.pitch_rate = %d", CO_OD_RAM.gyroscope.pitch_rate);
+		LOG_DBG( "  CO_OD_RAM.gyroscope.yaw_rate = %d", CO_OD_RAM.gyroscope.yaw_rate);
+		LOG_DBG( "  CO_OD_RAM.gyroscope.roll_rate = %d", CO_OD_RAM.gyroscope.roll_rate);
+		LOG_DBG( "  CO_OD_RAM.gyroscope.pitch_rate_raw = %d", CO_OD_RAM.gyroscope.pitch_rate_raw);
+		LOG_DBG( "  CO_OD_RAM.gyroscope.yaw_rate_raw = %d", CO_OD_RAM.gyroscope.yaw_rate_raw);
+		LOG_DBG( "  CO_OD_RAM.gyroscope.roll_rate_raw = %d", CO_OD_RAM.gyroscope.roll_rate_raw);
+
+		LOG_DBG( "  CO_OD_RAM.accelerometer.x = %d", CO_OD_RAM.accelerometer.x);
+		LOG_DBG( "  CO_OD_RAM.accelerometer.y = %d", CO_OD_RAM.accelerometer.y);
+		LOG_DBG( "  CO_OD_RAM.accelerometer.z = %d", CO_OD_RAM.accelerometer.z);
+		LOG_DBG( "  CO_OD_RAM.accelerometer.x_raw = %d", CO_OD_RAM.accelerometer.X_raw);
+		LOG_DBG( "  CO_OD_RAM.accelerometer.y_raw = %d", CO_OD_RAM.accelerometer.Y_raw);
+		LOG_DBG( "  CO_OD_RAM.accelerometer.z_raw = %d", CO_OD_RAM.accelerometer.Z_raw);
+
+		LOG_DBG( "  CO_OD_RAM.temperature = %d", CO_OD_RAM.temperature);
+
+		LOG_DBG( "  CO_OD_RAM.magnetorquer_current_x.current_set = %d", CO_OD_RAM.magnetorquer.current_x_setpoint);
+		LOG_DBG( "  CO_OD_RAM.magnetorquer_current_y.current_set = %d", CO_OD_RAM.magnetorquer.current_y_setpoint);
+		LOG_DBG( "  CO_OD_RAM.magnetorquer_current_z.current_set = %d", CO_OD_RAM.magnetorquer.current_z_setpoint);
+
+		LOG_DBG( "  CO_OD_RAM.magnetorquer_pwm_percent.x = %d", CO_OD_RAM.magnetorquer.pwm_x);
+		LOG_DBG( "  CO_OD_RAM.magnetorquer_pwm_percent.y = %d", CO_OD_RAM.magnetorquer.pwm_y);
+		LOG_DBG( "  CO_OD_RAM.magnetorquer_pwm_percent.z = %d", CO_OD_RAM.magnetorquer.pwm_z);
+
+		LOG_DBG( "  CO_OD_RAM.magnetorquer_current.x = %d", CO_OD_RAM.magnetorquer.current_x);
+		LOG_DBG( "  CO_OD_RAM.magnetorquer_current.y = %d", CO_OD_RAM.magnetorquer.current_y);
+		LOG_DBG( "  CO_OD_RAM.magnetorquer_current.z = %d", CO_OD_RAM.magnetorquer.current_z);
+
+		LOG_DBG( "  CO_OD_RAM.pos_z_magnetometer_1.x = %d", CO_OD_RAM.pos_z_magnetometer_1.x);
+		LOG_DBG( "  CO_OD_RAM.pos_z_magnetometer_1.y = %d", CO_OD_RAM.pos_z_magnetometer_1.y);
+		LOG_DBG( "  CO_OD_RAM.pos_z_magnetometer_1.z = %d", CO_OD_RAM.pos_z_magnetometer_1.z);
+
+		LOG_DBG( "  CO_OD_RAM.pos_z_magnetometer_2.x = %d", CO_OD_RAM.pos_z_magnetometer_2.x);
+		LOG_DBG( "  CO_OD_RAM.pos_z_magnetometer_2.y = %d", CO_OD_RAM.pos_z_magnetometer_2.y);
+		LOG_DBG( "  CO_OD_RAM.pos_z_magnetometer_2.z = %d", CO_OD_RAM.pos_z_magnetometer_2.z);
+
+		LOG_DBG( "  CO_OD_RAM.min_z_magnetometer_1.x = %d", CO_OD_RAM.min_z_magnetometer_1.x);
+		LOG_DBG( "  CO_OD_RAM.min_z_magnetometer_1.y = %d", CO_OD_RAM.min_z_magnetometer_1.y);
+		LOG_DBG( "  CO_OD_RAM.min_z_magnetometer_1.z = %d", CO_OD_RAM.min_z_magnetometer_1.z);
+
+		LOG_DBG( "  CO_OD_RAM.min_z_magnetometer_1.x = %d", CO_OD_RAM.min_z_magnetometer_2.x);
+		LOG_DBG( "  CO_OD_RAM.min_z_magnetometer_1.y = %d", CO_OD_RAM.min_z_magnetometer_2.y);
+		LOG_DBG( "  CO_OD_RAM.min_z_magnetometer_1.z = %d", CO_OD_RAM.min_z_magnetometer_2.z);
+
+		for (int i = 0; i < 3; i++) {
+			mt_pwm_phase_data_t *data = &g_adcs_data.mt_pwm_data[i];
+			LOG_DBG( "  measured_i_sense_voltage[%d] = %d uA, %u mV",
+							i,
+							data->current_feedback_measurement_uA,
+							(uint32_t) (data->current_feedback_measurement_V * 1000));
+		}
+		//LOG_DBG( "  CO_EM_GENERIC_ERROR:  %u", CO_isError(CO->em, CO_EM_GENERIC_ERROR));
+	}
+}
+
+static int set_pwm_phase(int i, bool level)
+{
+	const struct gpio_dt_spec *spec;
+	int ret;
+
+	switch (i) {
+	case 0:
+		spec = &mt_x_phase;
+		break;
+	case 1:
+		spec = &mt_y_phase;
+		break;
+	case 2:
+		spec = &mt_z_phase;
+		break;
+	default:
+		LOG_ERR("Incorrect axis selected: %d", i);
+		return -EINVAL;
+	}
+	ret = gpio_pin_set_dt(spec, level);
+	if (ret) {
+		LOG_ERR("Unable to set phase pin level: %d", ret);
+	}
+	return ret;
+}
+
+static int set_pwm_output(void) {
+	int ret = 0;
+	int err = 0;
+
+	for (int i = 0; i < 3; i++ ) {
+		int32_t t_now = k_uptime_get(); //in milliseconds
+		bool new_state;
+
+		//Updates will come in periodically via CANOpen, this will apply those updates to the PWM outputs.
+		if ((g_adcs_data.mt_pwm_data[i].last_update_time == 0) ||
+			((t_now - g_adcs_data.mt_pwm_data[i].last_update_time) > 10)) {
+
+			if( g_adcs_data.mt_pwm_data[i].current_pwm_percent != g_adcs_data.mt_pwm_data[i].target_pwm_percent ) {
+				LOG_DBG("target_pwm_percent = %d", g_adcs_data.mt_pwm_data[i].target_pwm_percent);
+
+				// can't disable on MCXN? pwmDisableChannel(&PWMD1, g_adcs_data.mt_pwm_data[i].pwm_channel_number);
+
+				// TODO: warning -- there may be a delay due to other threads running between changing the phase
+				// below, and setting the new PWM. This could cause a glitch and an unintentional pulse in the wrong
+				// direction.
+				if (g_adcs_data.mt_pwm_data[i].target_pwm_percent < 0) {
+					new_state = true;
+				} else {
+					new_state = false;
+				}
+				if (g_adcs_data.mt_pwm_data[i].phase_state != new_state) {
+					ret = set_pwm_phase(i, true);
+					if (ret) {
+						err = ret;
+						continue; // could cause guidance issues? mismatched phase and pwm value?
+					}
+					g_adcs_data.mt_pwm_data[i].phase_state = new_state;
+				}
+
+				const int32_t pwm_val = abs(g_adcs_data.mt_pwm_data[i].target_pwm_percent);
+
+				set_pwm(i, pwm_val); // set_pwm does the scaling from percentage to width
+
+				//pwmEnableChannel(&PWMD1, g_adcs_data.mt_pwm_data[i].pwm_channel_number, PWM_PERCENTAGE_TO_WIDTH(&PWMD1, pwm_val));
+
+				g_adcs_data.mt_pwm_data[i].current_pwm_percent = g_adcs_data.mt_pwm_data[i].target_pwm_percent;
+				g_adcs_data.mt_pwm_data[i].last_update_time = t_now;
+			}
+		}
+	}
+	return err;
+}
+
+static int init_magnetorquer(void) {
+	int err;
+
+	err = init_gpios();
+	if (err) {
+		LOG_ERR("Error initializing GPIOS: %d", err);
+		return err;
+	}
+
+	err = init_dac();
+	if (err) {
+		LOG_ERR("Error initializing DAC: %d", err);
+		return err;
+	}
+	// ChibiOS version did this:
+	//    dacPutChannelX(&DACD1, 0, 3600); //3V
+	// It's DAC resolution also 12 bit; the max value is 4095.
+	// If it's max output voltage is 3.3V, then
+	// 3.3V * 3600 /4095 = 2.90V, not 3V.
+	// Leaving for now.
+	// TODO: find out if this is OK.
+	err = write_dac(3600U);
+	if (err) {
+		LOG_ERR("Error writing DAC: %d", err);
+		return err;
+	}
+
+	err = init_pwm();
+	if (err) {
+		LOG_ERR("Error initializing GPIOS: %d", err);
+		return err;
+	}
+	err = init_adc();
+	if (err) {
+		LOG_ERR("Error initializing GPIOS: %d", err);
+		return err;
+	}
+
+	err = gpio_pin_set_dt(&mt_en, false);
+	if (err) {
+		LOG_ERR("Error initializing GPIOS: %d", err);
+		return err;
+	}
+	err = gpio_pin_set_dt(&n_mt_stby_rst, true);
+	if (err) {
+		LOG_ERR("Error initializing GPIOS: %d", err);
+		return err;
+	}
+
+	err = set_pwm_phase(0, false);
+	if (err) {
+		LOG_ERR("Error initializing GPIOS: %d", err);
+		return err;
+	}
+	err = set_pwm_phase(1, false);
+	if (err) {
+		LOG_ERR("Error initializing GPIOS: %d", err);
+		return err;
+	}
+	err = set_pwm_phase(2, false);
+	if (err) {
+		LOG_ERR("Error initializing GPIOS: %d", err);
+		return err;
+	}
+
+	err = gpio_pin_set_dt(&n_mt_stby_rst, false);
+	if (err) {
+		LOG_ERR("Error initializing GPIOS: %d", err);
+		return err;
+	}
+	k_sleep(K_MSEC(5));
+	err = gpio_pin_set_dt(&mt_en, true);
+	if (err) {
+		LOG_ERR("Error initializing GPIOS: %d", err);
+		return err;
+	}
+	k_sleep(K_MSEC(5));
+	err = gpio_pin_set_dt(&n_mt_stby_rst, true);
+	if (err) {
+		LOG_ERR("Error initializing GPIOS: %d", err);
+		return err;
+	}
+	k_sleep(K_MSEC(5));
+
+	return err;
+}
 
 static int handle_magnetorquer(void *p1, void *p2, void *p3)
 {
@@ -30,420 +461,86 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 
 	LOG_INF("Starting MAGNETORQUER thread");
 
-	err = init_dac();
-	if (err) {
-		return 0;
-	}
-	err = write_dac(1024U);
-	if (err) {
-		return 0;
-	}
-
-	err = init_pwm();
-	if (err) {
-		return 0;
-	}
+#if 0
 	err = set_pwm(0, 2500);
 	err = set_pwm(1, 5000);
 	err = set_pwm(2, 7500);
+#endif
 
-	err = init_adc();
+	err = init_magnetorquer();
 	if (err) {
+		LOG_ERR("Unable to control the magnetorquers!");
 		return 0;
 	}
 
-	err = acquire_adc_readings();
-	if (err) {
-		return 0;
-	}
-
+	int64_t t_start = k_uptime_get(); //in milliseconds
+	int64_t t_last = t_start;
+	int64_t t_now = t_start;
 	uint32_t adc_val;
-	for (int i = 0; i < get_num_adc_channels(); i++) {
-		err = read_adc(i, &adc_val);
-		if (err) {
-			continue;
-		}
-		LOG_INF("ADC num %d: %u mV", i, adc_val);
-	}
+	uint32_t iterations = 0;
+	int32_t sign;
+	float measured_i_sense_voltage;
+	float microamps;
+	int i;
 
-	while (true) {
-		k_msleep(100);
+    for (;;) {
+        LOG_DBG("IMU loop iteration %u system time %llu", iterations, t_last);
+		iterations++;
+
+		// x, y, and z are in units of: (for GYRO_FS_SEL = 7) 2097.2LSB/(º/s)
+		// temp is in units of decicentigrade (degrees C times 10)
+		int16_t temp;
+		get_gyro_data(&g_adcs_data.gyro_data.x,
+					  &g_adcs_data.gyro_data.y,
+					  &g_adcs_data.gyro_data.z,
+					  &g_adcs_data.temp_data);
+
+		for (i = 0; i < NUM_MAGS; i++) {
+			err = get_mag_reading(i,
+								  &g_adcs_data.magnetometer_data[i].x,
+								  &g_adcs_data.magnetometer_data[i].y,
+								  &g_adcs_data.magnetometer_data[i].z);
+		}
+
+		// tell ADC to read all channels at once
+		err = acquire_adc_readings();
+		if (err) {
+			return 0;
+		}
+
+		// now read the values acquired
+		for (i = 0; i < get_num_adc_channels(); i++) {
+			err = read_adc(i, &adc_val);
+			if (err) {
+				continue;
+			}
+			measured_i_sense_voltage = (((float) adc_val) / 4096.0f) * 3.3f;
+			// Based on the circuit design, this should nominally be 3V/amp.
+			// This calculation seems to be within 5%-10% accurate when compared to in line bench DMM readings.
+			microamps = (measured_i_sense_voltage / 3.0f) * 1000000.0f;
+
+			g_adcs_data.mt_pwm_data[i].current_feedback_measurement_V = measured_i_sense_voltage;
+
+			sign = (g_adcs_data.mt_pwm_data[i].current_pwm_percent < 0) ? -1 : 1;
+			g_adcs_data.mt_pwm_data[i].current_feedback_measurement_uA = (int32_t)(microamps * sign);
+		}
+
+		err = set_pwm_output();
+		if (err) {
+			LOG_WRN("One or more PWM channels could not be set: %d", err);
+		}
+
+		handle_can_open_data();
+
+		t_now = k_uptime_get();
+		int32_t t_sleep = (int32_t)(ITERATION_PERIOD - (t_now - t_last));
+
+		if (t_sleep <= 0) {
+			t_sleep = 1;
+		}
+		k_msleep(t_sleep);
+		t_last = t_now;
 	}
 }
 
 K_THREAD_DEFINE(magtqr_id, STACK_SIZE, handle_magnetorquer, NULL, NULL, NULL, PRIORITY, 0, 0);
-
-#if 0
-
-
-
-FROM CHIBIOS CODE:
-
-#define ADC_NUM_CHANNELS           4
-#define MY_SAMPLING_NUMBER         32
-#define ADC_BUFF_SIZE              (ADC_NUM_CHANNELS * MY_SAMPLING_NUMBER)
-static adcsample_t                 adc_sample_buff[ADC_BUFF_SIZE];
-
-static float measured_i_sense_voltage[ADC_NUM_CHANNELS];;
-
-/*
- * Context references for ADC conversion triggered by TIM1
- * http://forum.chibios.org/viewtopic.php?t=2254
- * https://forum.chibios.org/viewtopic.php?t=6036
- * https://forum.chibios.org/viewtopic.php?t=2093
- */
-
-
-//ADC_SMPR_SMP_1P5
-//ADC_SMPR_SMP_7P5
-//ADC_SMPR_SMP_13P5
-//ADC_SMPR_SMP_71P5
-//ADC_SMPR_SMP_239P5
-
-
-//volatile uint32_t adc_conversion_complete_callback_count = 0;
-//void adc_conversion_complete_callback(ADCDriver *adcp) {
-//	adc_conversion_complete_callback_count++;
-//}
-
-
-/**
- * This ADC is configured to trigger a single batch of ADC conversions based on the risigion edge of TRIGO from TIM1
- */
-static const ADCConversionGroup adcgrpcfg_tim1_trigo = {
-  .circular = FALSE,                                             /* Enables the circular buffer mode for the group.  */
-  .num_channels = ADC_NUM_CHANNELS,
-  .end_cb = NULL,
-  .error_cb = NULL,
-  .cfgr1 = ADC_CFGR1_RES_12BIT | ADC_CFGR1_EXTEN_RISING, /* CFGR1 */
-  .tr = ADC_TR(0, 0),                                    /* TR */
-  .smpr = ADC_SMPR_SMP_1P5,                             /* SMPR */
-  .chselr = ADC_CHSELR_CHSEL0 | ADC_CHSELR_CHSEL5 | ADC_CHSELR_CHSEL6 | ADC_CHSELR_CHSEL7     /* CHSELR, note, for continuous conversion mode you must configure 1 or an even number of channels */
-};
-
-
-static const DACConfig dac_config = {
-  .init         = 2047u,
-  .datamode     = DAC_DHRM_12BIT_RIGHT,
-  .cr           = 0
-};
-
-
-#define PWM_TIMER_FREQ	1000000 // Hz
-#define PWM_FREQ		2500// periods per sec
-#define PWM_PERIOD		PWM_TIMER_FREQ/PWM_FREQ
-
-
-//FIXME these PWM channel mappings may be wrong? or the mod-wires on the dev board may be wrong. Either way, Z-axis in the firmware is controling X-axis magnetorquer in the hardware on the dev ADCS board
-//PB13
-#define MT_Z_PWM_PWM_CHANNEL     (1 - 1)
-//PB14
-#define MT_Y_PWM_PWM_CHANNEL     (2 - 1)
-//PB15
-#define MT_X_PWM_PWM_CHANNEL     (3 - 1)
-
-/**
- * This PWM block is configured to enable the TRIGO output to start an ADC conversion batch when the PWM edge goes high.
- */
-static PWMConfig pwmcfg_1_trigo = {
-  .frequency = PWM_TIMER_FREQ,
-  .period = PWM_PERIOD,
-  .callback = NULL,
-  .channels = {
-   {PWM_OUTPUT_ACTIVE_LOW | PWM_COMPLEMENTARY_OUTPUT_ACTIVE_LOW, NULL},
-   {PWM_OUTPUT_ACTIVE_LOW | PWM_COMPLEMENTARY_OUTPUT_ACTIVE_LOW, NULL},
-   {PWM_OUTPUT_ACTIVE_LOW | PWM_COMPLEMENTARY_OUTPUT_ACTIVE_LOW, NULL},
-   {PWM_OUTPUT_ACTIVE_HIGH, NULL}
-  },
-  .cr2 = TIM_CR2_MMS_1,//CR2
- #if STM32_PWM_USE_ADVANCED
-   .bdtr = 0, //BDTR
- #endif
-   .dier = 0,//DIER
-};
-
-
-
-typedef enum {
-    ADCS_OD_ERROR_INFO_CODE_NONE = 0,
-    ADCS_OD_ERROR_INFO_CODE_IMU_COMM_FAILURE,
-    ADCS_OD_ERROR_INFO_CODE_ACCL_CHIP_ID_MISMATCH,
-    ADCS_OD_ERROR_INFO_CODE_GYRO_CHIP_ID_MISMATCH,
-	ADCS_OD_ERROR_INFO_CODE_IMU_INIT_FAILURE,
-	ADCS_OD_ERROR_INFO_CODE_IMU_DATA_UPDATE_FAILURE,
-	ADCS_OD_ERROR_INFO_CODE_MAGNETOMETER_0_INIT_FAILURE,
-	ADCS_OD_ERROR_INFO_CODE_MAGNETOMETER_1_INIT_FAILURE,
-	ADCS_OD_ERROR_INFO_CODE_MAGNETOMETER_2_INIT_FAILURE,
-	ADCS_OD_ERROR_INFO_CODE_MAGNETOMETER_3_INIT_FAILURE,
-	ADCS_OD_ERROR_INFO_CODE_LTZ_PLUS_Z_ENDCAP_FAILURE,
-	ADCS_OD_ERROR_INFO_CODE_LTZ_MINUS_Z_ENDCAP_FAILURE,
-	ADCS_OD_ERROR_INFO_CODE_MAGNETOMETER_0_COMM_FAILURE,
-	ADCS_OD_ERROR_INFO_CODE_MAGNETOMETER_1_COMM_FAILURE,
-	ADCS_OD_ERROR_INFO_CODE_MAGNETOMETER_2_COMM_FAILURE,
-	ADCS_OD_ERROR_INFO_CODE_MAGNETOMETER_3_COMM_FAILURE,
-} adcs_od_error_info_code_t;
-
-typedef struct {
-	int32_t current_pwm_percent; //0-10000
-	int32_t target_pwm_percent; //Negative values indicate the phase should be inverted
-
-	float current_feedback_measurement_V; //Volts, Note: this is the average voltage while the PWM output is high.
-	int32_t current_feedback_measurement_uA; //uA. Note: this is the average current flowing while the PWM output is high. It does not represent overall average current.
-
-	uint8_t phase_gpio_pin_number;
-	uint8_t pwm_channel_number;
-
-	systime_t last_update_time;
-} mt_pwm_phase_data_t;
-
-
-
-void set_pwm_output(void) {
-	if( PWMD1.state == PWM_STOP ) {
-		pwmStart(&PWMD1, &pwmcfg_1_trigo);
-#if 0
-		chprintf(DEBUG_SD, "Turning on PWM output...\r\n");
-		pwmEnableChannel(&PWMD1, MT_X_PWM_PWM_CHANNEL, PWM_PERCENTAGE_TO_WIDTH(&PWMD1, 1000));
-		pwmEnableChannel(&PWMD1, MT_Y_PWM_PWM_CHANNEL, PWM_PERCENTAGE_TO_WIDTH(&PWMD1, 1000));
-		pwmEnableChannel(&PWMD1, MT_Z_PWM_PWM_CHANNEL, PWM_PERCENTAGE_TO_WIDTH(&PWMD1, 1000));
-#endif
-	}
-
-#if 1
-	for(int i = 0; i < 3; i++ ) {
-		const systime_t now_time = chVTGetSystemTime();
-
-//		if( i == 1 ) {
-//			int mod = (now_time / 40000) % 4;
-//			switch (mod) {
-//				case 0:
-//					g_adcs_data.mt_pwm_data[i].target_pwm_percent =	map_current_uA_to_pwm_duty_cycle(500000, i);
-//					break;
-//				case 1:
-//					g_adcs_data.mt_pwm_data[i].target_pwm_percent = 0;
-//					break;
-//				case 2:
-//					g_adcs_data.mt_pwm_data[i].target_pwm_percent =	map_current_uA_to_pwm_duty_cycle(-500000, i);
-//					break;
-//				case 3:
-//					g_adcs_data.mt_pwm_data[i].target_pwm_percent = 0;
-//					break;
-//			}
-//		}
-
-		//Updates will come in periodically via CANOpen, this will apply those updates to the PWM outputs.
-		if( g_adcs_data.mt_pwm_data[i].last_update_time == 0 || chTimeDiffX(g_adcs_data.mt_pwm_data[i].last_update_time, now_time) > 10 ) {
-			if( g_adcs_data.mt_pwm_data[i].current_pwm_percent != g_adcs_data.mt_pwm_data[i].target_pwm_percent ) {
-				chprintf(DEBUG_SD, "target_pwm_percent = %d\r\n", g_adcs_data.mt_pwm_data[i].target_pwm_percent);
-
-				pwmDisableChannel(&PWMD1, g_adcs_data.mt_pwm_data[i].pwm_channel_number);
-
-				if( g_adcs_data.mt_pwm_data[i].target_pwm_percent < 0 ) {
-					palSetPad(GPIOB, g_adcs_data.mt_pwm_data[i].phase_gpio_pin_number);
-				} else {
-					palClearPad(GPIOB, g_adcs_data.mt_pwm_data[i].phase_gpio_pin_number);
-				}
-
-				const int32_t pwm_val = ABS(g_adcs_data.mt_pwm_data[i].target_pwm_percent);
-				pwmEnableChannel(&PWMD1, g_adcs_data.mt_pwm_data[i].pwm_channel_number, PWM_PERCENTAGE_TO_WIDTH(&PWMD1, pwm_val));
-
-				g_adcs_data.mt_pwm_data[i].current_pwm_percent = g_adcs_data.mt_pwm_data[i].target_pwm_percent;
-				g_adcs_data.mt_pwm_data[i].last_update_time = now_time;
-			}
-		}
-	}
-#endif
-}
-
-
-int32_t current_feedback_convert_volts_to_microamps(const float volts) {
-	//Based on the circuit design, this should nominally be 3V/amp.
-	//This calculation seems to be within 5%-10% accurate when compared to in line bench DMM readings.
-	float microamps = (volts / 3.0) * 1000000.0;
-
-	return(microamps);
-}
-
-void print_debug_output(void) {
-	static systime_t last_print_time = 0;
-	systime_t now_time = TIME_I2MS(chVTGetSystemTime());
-	if (chTimeDiffX(last_print_time, now_time) > 750) {
-		last_print_time = now_time;
-
-		chprintf(DEBUG_SD, "================\r\n");
-		chprintf(DEBUG_SD, "CANOpen Data:\r\n");
-		chprintf(DEBUG_SD, "  OD_RAM.x4000_gyroscope.pitch_rate = %d\r\n", OD_RAM.x4000_gyroscope.pitch_rate);
-		chprintf(DEBUG_SD, "  OD_RAM.x4000_gyroscope.yaw_rate = %d\r\n", OD_RAM.x4000_gyroscope.yaw_rate);
-		chprintf(DEBUG_SD, "  OD_RAM.x4000_gyroscope.roll_rate = %d\r\n", OD_RAM.x4000_gyroscope.roll_rate);
-		chprintf(DEBUG_SD, "  OD_RAM.x4000_gyroscope.pitch_rate_raw = %d\r\n", OD_RAM.x4000_gyroscope.pitch_rate_raw);
-		chprintf(DEBUG_SD, "  OD_RAM.x4000_gyroscope.yaw_rate_raw = %d\r\n", OD_RAM.x4000_gyroscope.yaw_rate_raw);
-		chprintf(DEBUG_SD, "  OD_RAM.x4000_gyroscope.roll_rate_raw = %d\r\n", OD_RAM.x4000_gyroscope.roll_rate_raw);
-
-		chprintf(DEBUG_SD, "  OD_RAM.x4001_accelerometer.x = %d\r\n", OD_RAM.x4001_accelerometer.x);
-		chprintf(DEBUG_SD, "  OD_RAM.x4001_accelerometer.y = %d\r\n", OD_RAM.x4001_accelerometer.y);
-		chprintf(DEBUG_SD, "  OD_RAM.x4001_accelerometer.z = %d\r\n", OD_RAM.x4001_accelerometer.z);
-		chprintf(DEBUG_SD, "  OD_RAM.x4001_accelerometer.x_raw = %d\r\n", OD_RAM.x4001_accelerometer.x_raw);
-		chprintf(DEBUG_SD, "  OD_RAM.x4001_accelerometer.y_raw = %d\r\n", OD_RAM.x4001_accelerometer.y_raw);
-		chprintf(DEBUG_SD, "  OD_RAM.x4001_accelerometer.z_raw = %d\r\n", OD_RAM.x4001_accelerometer.z_raw);
-
-		chprintf(DEBUG_SD, "  OD_RAM.x4002_temperature = %d\r\n", OD_RAM.x4002_temperature);
-
-		chprintf(DEBUG_SD, "  OD_RAM.x4007_magnetorquer_current_x.current_set = %d\r\n", OD_RAM.x4007_magnetorquer.current_x_setpoint);
-		chprintf(DEBUG_SD, "  OD_RAM.x4008_magnetorquer_current_y.current_set = %d\r\n", OD_RAM.x4007_magnetorquer.current_y_setpoint);
-		chprintf(DEBUG_SD, "  OD_RAM.x4009_magnetorquer_current_z.current_set = %d\r\n", OD_RAM.x4007_magnetorquer.current_z_setpoint);
-
-		chprintf(DEBUG_SD, "  OD_RAM.x4010_magnetorquer_pwm_percent.x = %d\r\n", OD_RAM.x4007_magnetorquer.pwm_x);
-		chprintf(DEBUG_SD, "  OD_RAM.x4010_magnetorquer_pwm_percent.y = %d\r\n", OD_RAM.x4007_magnetorquer.pwm_y);
-		chprintf(DEBUG_SD, "  OD_RAM.x4010_magnetorquer_pwm_percent.z = %d\r\n", OD_RAM.x4007_magnetorquer.pwm_z);
-
-		chprintf(DEBUG_SD, "  OD_RAM.x4007_magnetorquer_current.x = %d\r\n", OD_RAM.x4007_magnetorquer.current_x);
-		chprintf(DEBUG_SD, "  OD_RAM.x4007_magnetorquer_current.y = %d\r\n", OD_RAM.x4007_magnetorquer.current_y);
-		chprintf(DEBUG_SD, "  OD_RAM.x4007_magnetorquer_current.z = %d\r\n", OD_RAM.x4007_magnetorquer.current_z);
-
-		chprintf(DEBUG_SD, "  OD_RAM.x4003_pos_z_magnetometer_1.x = %d\r\n", OD_RAM.x4003_pos_z_magnetometer_1.x);
-		chprintf(DEBUG_SD, "  OD_RAM.x4003_pos_z_magnetometer_1.y = %d\r\n", OD_RAM.x4003_pos_z_magnetometer_1.y);
-		chprintf(DEBUG_SD, "  OD_RAM.x4003_pos_z_magnetometer_1.z = %d\r\n", OD_RAM.x4003_pos_z_magnetometer_1.z);
-
-		chprintf(DEBUG_SD, "  OD_RAM.x4004_pos_z_magnetometer_2.x = %d\r\n", OD_RAM.x4004_pos_z_magnetometer_2.x);
-		chprintf(DEBUG_SD, "  OD_RAM.x4004_pos_z_magnetometer_2.y = %d\r\n", OD_RAM.x4004_pos_z_magnetometer_2.y);
-		chprintf(DEBUG_SD, "  OD_RAM.x4004_pos_z_magnetometer_2.z = %d\r\n", OD_RAM.x4004_pos_z_magnetometer_2.z);
-
-		chprintf(DEBUG_SD, "  OD_RAM.x4005_min_z_magnetometer_1.x = %d\r\n", OD_RAM.x4005_min_z_magnetometer_1.x);
-		chprintf(DEBUG_SD, "  OD_RAM.x4005_min_z_magnetometer_1.y = %d\r\n", OD_RAM.x4005_min_z_magnetometer_1.y);
-		chprintf(DEBUG_SD, "  OD_RAM.x4005_min_z_magnetometer_1.z = %d\r\n", OD_RAM.x4005_min_z_magnetometer_1.z);
-
-		chprintf(DEBUG_SD, "  OD_RAM.x4005_min_z_magnetometer_1.x = %d\r\n", OD_RAM.x4006_min_z_magnetometer_2.x);
-		chprintf(DEBUG_SD, "  OD_RAM.x4005_min_z_magnetometer_1.y = %d\r\n", OD_RAM.x4006_min_z_magnetometer_2.y);
-		chprintf(DEBUG_SD, "  OD_RAM.x4005_min_z_magnetometer_1.z = %d\r\n", OD_RAM.x4006_min_z_magnetometer_2.z);
-
-
-
-		for(int i = 0; i < 3; i++ ) {
-			mt_pwm_phase_data_t *data = &g_adcs_data.mt_pwm_data[i];
-			chprintf(DEBUG_SD, "  measured_i_sense_voltage[%d] = %d uA, %u mV\r\n",
-							i,
-							data->current_feedback_measurement_uA,
-							(uint32_t) (data->current_feedback_measurement_V * 1000));
-		}
-
-
-		chprintf(DEBUG_SD, "  CO_EM_GENERIC_ERROR:  %u\r\n", CO_isError(CO->em, CO_EM_GENERIC_ERROR));
-
-	}
-}
-
-
-void process_magnetorquer(void) {
-	chprintf(DEBUG_SD, "Entering process_magnetorquer()\r\n");
-//	chprintf(DEBUG_SD, "ADCD1.state = %u\r\n", ADCD1.state);
-
-	if( ADCD1.state == ADC_STOP || ADCD1.state == ADC_UNINIT ) {
-		adcStart(&ADCD1, NULL);
-	}
-
-	if( ADCD1.state == ADC_COMPLETE ) {
-		adcStopConversion(&ADCD1);
-	}
-
-	if( ADCD1.state == ADC_READY ) {
-		chprintf(DEBUG_SD, "ADC ready, reading ADC values...\r\n");
-
-		uint32_t channel_sums[MY_SAMPLING_NUMBER];
-		memset(channel_sums, 0, sizeof(channel_sums));
-
-		for(int s = 0; s < MY_SAMPLING_NUMBER; s++) {
-//			chprintf(DEBUG_SD, "  adc_sample_buff[%d] = [", s);
-
-			for (int adc_chan_idx = 1; adc_chan_idx < ADC_NUM_CHANNELS; adc_chan_idx++) {
-				const int idx = (s * ADC_NUM_CHANNELS) + adc_chan_idx;
-				channel_sums[adc_chan_idx] += adc_sample_buff[idx];
-//				chprintf(DEBUG_SD, "%d, ", adc_sample_buff[idx]);
-			}
-//			chprintf(DEBUG_SD, "]\r\n");
-		}
-
-		for (int adc_chan_idx = 1; adc_chan_idx < ADC_NUM_CHANNELS; adc_chan_idx++) {
-			const uint32_t channel_avg = channel_sums[adc_chan_idx] / MY_SAMPLING_NUMBER;
-			measured_i_sense_voltage[adc_chan_idx] = (((float) channel_avg) / 4096.0) * 3.3;
-//			chprintf(DEBUG_SD, "avg = %u, voltage[%d] = %u mV\r\n", channel_avg, adc_chan_idx, ((uint32_t) (measured_i_sense_voltage[adc_chan_idx] * 1000.0)));
-
-			uint8_t dest_mt_idx = 0;
-			if( adc_chan_idx == 1 ) {
-				dest_mt_idx = 0;
-			} else if( adc_chan_idx == 2 ) {
-				dest_mt_idx = 1;
-			} else if( adc_chan_idx == 3 ) {
-				dest_mt_idx = 2;
-			}
-
-			g_adcs_data.mt_pwm_data[dest_mt_idx].current_feedback_measurement_V = measured_i_sense_voltage[adc_chan_idx];
-			g_adcs_data.mt_pwm_data[dest_mt_idx].current_feedback_measurement_uA = current_feedback_convert_volts_to_microamps(measured_i_sense_voltage[adc_chan_idx]);
-			if( g_adcs_data.mt_pwm_data[dest_mt_idx].current_pwm_percent < 0 ) {
-				g_adcs_data.mt_pwm_data[dest_mt_idx].current_feedback_measurement_uA *= -1;
-			}
-
-		}
-
-		chprintf(DEBUG_SD, "Staring conversion...\r\n");// chThdSleepMilliseconds(10);
-		adcStartConversion(&ADCD1, &adcgrpcfg_tim1_trigo, adc_sample_buff, ADC_BUFF_SIZE);//Starts an ADC conversion.
-	}
-
-//	chprintf(DEBUG_SD, "adc_conv_cb#=%u, ", adc_conversion_complete_callback_count);
-//	chprintf(DEBUG_SD, "adc_error_cb#=%u\r\n", adc_conversion_error_callback_count);
-
-	chprintf(DEBUG_SD, "Setting magnetorquer PWM outputs...\r\n");
-	set_pwm_output();
-	print_debug_output();
-	chprintf(DEBUG_SD, "Exiting process_magnetorquer()\r\n");
-}
-
-
-void init_magnetorquer(void) {
-	memset(&g_adcs_data.mt_pwm_data, 0, sizeof(g_adcs_data.mt_pwm_data));
-
-	g_adcs_data.mt_pwm_data[0].phase_gpio_pin_number = GPIOB_MT_X_PHASE;
-	g_adcs_data.mt_pwm_data[0].pwm_channel_number = MT_X_PWM_PWM_CHANNEL;
-
-	g_adcs_data.mt_pwm_data[1].phase_gpio_pin_number = GPIOB_MT_Y_PHASE;
-	g_adcs_data.mt_pwm_data[1].pwm_channel_number = MT_Y_PWM_PWM_CHANNEL;
-
-	g_adcs_data.mt_pwm_data[2].phase_gpio_pin_number = GPIOB_MT_Z_PHASE;
-	g_adcs_data.mt_pwm_data[2].pwm_channel_number = MT_Z_PWM_PWM_CHANNEL;
-
-	for(int i = 0; i < 3; i++ ) {
-		palSetPad(GPIOB, g_adcs_data.mt_pwm_data[i].phase_gpio_pin_number);
-	}
-
-
-
-	palSetPadMode(GPIOA, GPIOA_MT_ILIM, PAL_MODE_INPUT_ANALOG);
-	dacStart(&DACD1, &dac_config);
-//	dacPutChannelX(&DACD1, 0, 650); //0.44V
-	dacPutChannelX(&DACD1, 0, 3600); //3V
-
-//	palSetPad(GPIOA, GPIOA_MT_STBY_RST);
-//	palSetPad(GPIOB, GPIOB_MT_EN);
-
-
-
-	palClearPad(GPIOB, GPIOB_MT_EN);
-	palSetPad(GPIOA, GPIOA_MT_STBY_RST);
-
-	palClearPad(GPIOB, GPIOB_MT_X_PWM);
-	palClearPad(GPIOB, GPIOB_MT_Y_PWM);
-	palClearPad(GPIOB, GPIOB_MT_Z_PWM);
-
-	palClearPad(GPIOB, GPIOB_MT_X_PHASE);
-	palClearPad(GPIOB, GPIOB_MT_Y_PHASE);
-	palClearPad(GPIOB, GPIOB_MT_Z_PHASE);
-
-
-	palClearPad(GPIOA, GPIOA_MT_STBY_RST);
-	chThdSleepMilliseconds(5);
-	palSetPad(GPIOB, GPIOB_MT_EN);
-	chThdSleepMilliseconds(5);
-	palSetPad(GPIOA, GPIOA_MT_STBY_RST);
-	chThdSleepMilliseconds(5);
-}
-
-#endif

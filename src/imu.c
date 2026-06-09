@@ -7,6 +7,8 @@
 #include <canopennode.h>
 #include <CO_OD.h>
 
+#include "imu.h"
+
 /**
  * From the mag requirements doc, which reigns supreme not this
  * comment block:
@@ -59,6 +61,11 @@ static uint8_t prev_bank;
 #define IMU_THREAD_STACK_SIZE 2048
 #define IMU_THREAD_PRIORITY 0
 extern const k_tid_t imu_id;
+
+static int16_t gx = 0;
+static int16_t gy = 0;
+static int16_t gz = 0;
+static int16_t gtemp = 0;
 
 static int check_i2c_device_presence(uint8_t addr)
 {
@@ -475,6 +482,14 @@ static int process_data(int16_t *x, int16_t *y, int16_t *z, int16_t *temp)
 	return 0;
 }
 
+void get_gyro_data(int16_t *x, int16_t *y, int16_t *z, int16_t *temp)
+{
+	*x = gx;
+	*y = gy;
+	*z = gz;
+	*temp = gtemp;
+}
+
 static void handle_imu(void *p1, void *p2, void *p3)
 {
 	int err;
@@ -493,13 +508,10 @@ static void handle_imu(void *p1, void *p2, void *p3)
 		return;
 	}
 
-	int16_t x = 0;
-	int16_t y = 0;
-	int16_t z = 0;
-	int16_t temp = 0;
 	int count = 0;
 	int i;
 	uint8_t int_status;
+	int16_t temp;
 
 	for (;;) {
 		for (i = 0; i < DATA_READY_TRIES; i++) {
@@ -512,24 +524,18 @@ static void handle_imu(void *p1, void *p2, void *p3)
 		if (err) {
 			LOG_ERR("Timeout waiting for data ready");
 		}
-		err = process_data(&x, &y, &z, &temp);
+		err = process_data(&gx, &gy, &gz, &temp);
 
 		// Temperature in Degrees Centigrade = (TEMP_DATA / 132.48) + 25
 		int16_t temp_decicentigrade = (int16_t)(((int)temp * 100) / (1325) + 250);
 
-		// update CAN with new readings
-		CO_LOCK_OD();
-		CO_OD_RAM.gyroscope.pitch_rate_raw = x;
-		CO_OD_RAM.gyroscope.roll_rate_raw = y;
-		CO_OD_RAM.gyroscope.yaw_rate_raw = z;
-		CO_OD_RAM.temperature = (int8_t)(temp_decicentigrade / 10);
-		CO_UNLOCK_OD();
+		gtemp = temp_decicentigrade / 10;
 
 		if (!err) {
 			count++;
 			if (count >= HIST_SIZE) {
 				count = 0;
-				LOG_INF("Ave gyro: (%d, %d, %d)", x, y, z);
+				LOG_INF("Ave gyro: (%d, %d, %d)", gx, gy, gz);
 				LOG_INF("Ave temp (dC): %d", temp_decicentigrade);
 			}
 		}

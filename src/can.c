@@ -141,9 +141,9 @@ static void handle_can(void *p1, void *p2, void *p3)
 		while (true) {
 			bool_t syncWas = false;
 
+#if 1
 			timeout = 1U;
 			timestamp = k_uptime_get();
-
 			if (wr_timeout_count++ >= 1000U) {
 				wr_timeout_count = 0U;
 
@@ -153,12 +153,25 @@ static void handle_can(void *p1, void *p2, void *p3)
 				/* Write outputs */
 				CO_process_TPDO(CO, syncWas, timeout * 1000U * 1000U);
 			}
+			reset = CO_process(CO, (uint16_t)elapsed, &timeout);
+			if (reset != CO_RESET_NOT) {
+				break;
+			}
+#else
+			timeout = 1000U;
+			timestamp = k_uptime_get();
+
+			/* Read inputs */
+			CO_process_RPDO(CO, syncWas);
+
+			/* Write outputs */
+			CO_process_TPDO(CO, syncWas, timeout * 1000U);
 
 			reset = CO_process(CO, (uint16_t)elapsed, &timeout);
 			if (reset != CO_RESET_NOT) {
 				break;
 			}
-
+#endif
 			if (timeout > 0) {
 				k_sleep(K_MSEC(timeout));
 				elapsed = (uint32_t)k_uptime_delta(&timestamp);
