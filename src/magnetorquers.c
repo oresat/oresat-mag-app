@@ -5,6 +5,7 @@
 #include <zephyr/drivers/sensor.h>
 #include <zephyr/drivers/sensor_data_types.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/i2c.h>
 #include <zephyr/rtio/rtio.h>
 #include <zephyr/logging/log.h>
 #include <canopennode.h>
@@ -85,7 +86,13 @@ static int init_gpios(void)
 {
 	int ret;
 
-	ret = gpio_pin_configure_dt(&mt_en, GPIO_OUTPUT_INACTIVE | GPIO_LINE_OPEN_DRAIN);
+	// TODO: figure this out
+	// GPIO_LINE_OPEN_DRAIN gives an assertion:
+	// ASSERTION FAIL [(flags & (1 << 1)) != 0 || (flags & (1 << 2)) == 0] @ WEST_TOPDIR/zephyr/include/zephyr/drivers/gpio.h:1002
+
+	// this should be GPIO_OPEN_DRAIN, but the MCXN947 gpio driver does not support it
+	// instead, set to INPUT to float, or OUTPUT_INACTIVE to drive low
+	ret = gpio_pin_configure_dt(&mt_en, GPIO_INPUT);
 	if (ret) {
 		return ret;
 	}
@@ -156,6 +163,15 @@ static int16_t raw_to_milligauss(int16_t raw)
 		float gauss = 1000.0f * ((float) raw) / 4096.0f;
 		return (int16_t)gauss;
 }
+
+// to simulate the C3 ADCS code setting the setpoints for node id 0x10:
+//
+// write current_x_setpoint to 291:
+// $ cansend can0 610#23.07.40.04.23.01.00.00
+// write current_y_setpoint to 4660:
+// $ cansend can0 610#23.07.40.05.34.12.00.00
+// write current_z_setpoint to 69:
+// $ cansend can0 610#23.07.40.06.45.00.00.00
 
 static void handle_can_open_data(void) {
 
@@ -232,7 +248,7 @@ void print_debug_output(void) {
 	static int64_t last_print_time = 0;
 	int64_t now = k_uptime_get();
 
-	if ((now - last_print_time) > 750) {
+	if ((now - last_print_time) > 1500) { //750) {
 		last_print_time = now;
 
 		LOG_DBG( "================");
@@ -366,6 +382,47 @@ static int set_pwm_output(void) {
 	return err;
 }
 
+static int reset_magnetorquer(void)
+{
+	int err;
+
+	err = gpio_pin_configure_dt(&mt_en, GPIO_OUTPUT_INACTIVE); // drive the pin low -- disable power stage
+	if (err) {
+		LOG_ERR("Error initializing GPIOS: %d", err);
+		return err;
+	}
+	err = gpio_pin_set_dt(&mt_en, false);
+	if (err) {
+		LOG_ERR("Error initializing GPIOS: %d", err);
+		return err;
+	}
+
+	err = gpio_pin_set_dt(&n_mt_stby_rst, false); // goto low power/reset mode
+	if (err) {
+		LOG_ERR("Error initializing GPIOS: %d", err);
+		return err;
+	}
+	k_sleep(K_MSEC(5));
+	err = gpio_pin_configure_dt(&mt_en, GPIO_INPUT); // float the pin; enable power stage
+	if (err) {
+		LOG_ERR("Error initializing GPIOS: %d", err);
+		return err;
+	}
+	err = gpio_pin_set_dt(&mt_en, true);
+	if (err) {
+		LOG_ERR("Error initializing GPIOS: %d", err);
+		return err;
+	}
+	k_sleep(K_MSEC(5));
+	err = gpio_pin_set_dt(&n_mt_stby_rst, true); // activate
+	if (err) {
+		LOG_ERR("Error initializing GPIOS: %d", err);
+		return err;
+	}
+	k_sleep(K_MSEC(5));
+	return err;
+}
+
 static int init_magnetorquer(void) {
 	int err;
 
@@ -404,6 +461,11 @@ static int init_magnetorquer(void) {
 		return err;
 	}
 
+	err = gpio_pin_configure_dt(&mt_en, GPIO_OUTPUT_INACTIVE); // drive the pin low
+	if (err) {
+		LOG_ERR("Error initializing GPIOS: %d", err);
+		return err;
+	}
 	err = gpio_pin_set_dt(&mt_en, false);
 	if (err) {
 		LOG_ERR("Error initializing GPIOS: %d", err);
@@ -431,31 +493,30 @@ static int init_magnetorquer(void) {
 		return err;
 	}
 
-	err = gpio_pin_set_dt(&n_mt_stby_rst, false);
-	if (err) {
-		LOG_ERR("Error initializing GPIOS: %d", err);
-		return err;
-	}
-	k_sleep(K_MSEC(5));
-	err = gpio_pin_set_dt(&mt_en, true);
-	if (err) {
-		LOG_ERR("Error initializing GPIOS: %d", err);
-		return err;
-	}
-	k_sleep(K_MSEC(5));
-	err = gpio_pin_set_dt(&n_mt_stby_rst, true);
-	if (err) {
-		LOG_ERR("Error initializing GPIOS: %d", err);
-		return err;
-	}
-	k_sleep(K_MSEC(5));
-
+	err = reset_magnetorquer();
 	return err;
+}
+
+static void check_magnetorquer_fault(void)
+{
+	int fault;
+
+	fault = gpio_pin_get_dt(&n_mt_en_fault);
+	if (fault) {
+		LOG_WRN("Fault on magnetorquer driver(s)!");
+
+		// TODO: ask Andrew if this is ok to do. It wasn't in the old code.
+		// LOG_INF("Resetting magnetorquer drivers.");
+		// (void)reset_magnetorquer();
+	}
+
 }
 
 static int handle_magnetorquer(void *p1, void *p2, void *p3)
 {
 	int err;
+
+    i2c_recover_bus(DEVICE_DT_GET(DT_NODELABEL(flexcomm0_lpi2c0)));
 
 	k_thread_name_set(magtqr_id, "magtqr_thread");
 
@@ -484,12 +545,11 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 	int i;
 
     for (;;) {
-        LOG_DBG("IMU loop iteration %u system time %llu", iterations, t_last);
+        //LOG_DBG("IMU loop iteration %u system time %llu", iterations, t_last);
 		iterations++;
 
 		// x, y, and z are in units of: (for GYRO_FS_SEL = 7) 2097.2LSB/(º/s)
 		// temp is in units of decicentigrade (degrees C times 10)
-		int16_t temp;
 		get_gyro_data(&g_adcs_data.gyro_data.x,
 					  &g_adcs_data.gyro_data.y,
 					  &g_adcs_data.gyro_data.z,
@@ -529,6 +589,10 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 		if (err) {
 			LOG_WRN("One or more PWM channels could not be set: %d", err);
 		}
+
+		check_magnetorquer_fault();
+
+		print_debug_output();
 
 		handle_can_open_data();
 

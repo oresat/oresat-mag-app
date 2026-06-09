@@ -17,7 +17,7 @@
 #include <zephyr/drivers/adc.h>
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(oresat_adc, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(oresat_adc, LOG_LEVEL_INF);
 
 /* 1000 msec = 1 sec */
 #define ADC_SLEEP_TIME_MS 100 /* Use 5 to generate more data to graph samples that follow the DAC output */
@@ -184,14 +184,14 @@ int init_adc(void)
 			continue;
 		}
 		padi = &adc_dev_infos[i];
-		LOG_DBG("Init adc%d: %s, num_ch:%d, num_vref:%d", i, adc->name, padi->num_ch, padi->num_vrefs);
+		LOG_INF("Init adc%d: %s, num_ch:%d, num_vref:%d", i, adc->name, padi->num_ch, padi->num_vrefs);
 	}
 
 	for (i = 0U; i < ADC_DEV_COUNT; i++) {
 		adc = adc_devs[i];
 		padi = &adc_dev_infos[i];
 		for (j = 0; j < padi->num_ch; j++) {
-			LOG_DBG("  Init ch:%d", j);
+			LOG_INF("  Init ch:%d", j);
 			config = &padi->config[j];
 			err = adc_channel_setup(adc, &padi->config[j]);
 			if (err < 0) {
@@ -199,11 +199,11 @@ int init_adc(void)
 				return 0;
 			}
 			#ifdef CONFIG_ADC_CONFIGURABLE_INPUTS
-			LOG_DBG("  Channel: %u, gain: %u, acq time: %u, diff: %u, inp_pos: %u, inp_neg: %u",
+			LOG_INF("  Channel: %u, gain: %u, acq time: %u, diff: %u, inp_pos: %u, inp_neg: %u",
 					config->channel_id, config->gain, config->acquisition_time,
 					config->differential, config->input_positive, config->input_negative);
 			#else
-			LOG_DBG("  Channel: %u, gain: %u, acq time: %u, diff: %u",
+			LOG_INF("  Channel: %u, gain: %u, acq time: %u, diff: %u",
 					config->channel_id, config->gain, config->acquisition_time,
 					config->differential);
 			#endif
@@ -213,7 +213,7 @@ int init_adc(void)
 			if ((padi->vrefs_mv[k] == 0) && (padi->config->reference == ADC_REF_INTERNAL)) {
 				padi->vrefs_mv[k] = adc_ref_internal(adc);
 			}
-			LOG_DBG("  Vref: %u, vref_mv: %u", k, padi->vrefs_mv[k]);
+			LOG_INF("  Vref: %u, vref_mv: %u", k, padi->vrefs_mv[k]);
 		}
 	}
 	return err;

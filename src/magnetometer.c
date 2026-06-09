@@ -239,15 +239,16 @@ int init_mag(void)
 	return ret;
 }
 
-int get_mag_reading(int mag_num, int32_t *x, int32_t *y, int32_t *z)
+int get_mag_reading(int mag_num, int16_t *x, int16_t *y, int16_t *z)
 {
 	if (mag_num >= NUM_MAGS) {
 		return -EINVAL; // we don't support that one yet
 	}
 
-	*x = mag_data[mag_num].readings[0].x;
-	*y = mag_data[mag_num].readings[0].y;
-	*z = mag_data[mag_num].readings[0].z;
+	// TODO: check if the range returned from the driver can go above 16 bits
+	*x = (int16_t)mag_data[mag_num].readings[0].x;
+	*y = (int16_t)mag_data[mag_num].readings[0].y;
+	*z = (int16_t)mag_data[mag_num].readings[0].z;
 
 	return 0;
 }

@@ -44,7 +44,7 @@
 #include "../drivers/sensor/tdk/icm4268x/icm4268x_reg.h"
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(imu, CONFIG_LOG_DEFAULT_LEVEL);
+LOG_MODULE_REGISTER(imu, LOG_LEVEL_INF);
 
 #define IMU_DEVICE_ADDR 0x68 // I2C 7 bit address
 #define IMU_DEVICE_ADDR_ALT 0x69 // I2C 7 bit address
@@ -533,10 +533,10 @@ static void handle_imu(void *p1, void *p2, void *p3)
 
 		if (!err) {
 			count++;
-			if (count >= HIST_SIZE) {
+			if (count >= HIST_SIZE * 10) {
 				count = 0;
-				LOG_INF("Ave gyro: (%d, %d, %d)", gx, gy, gz);
-				LOG_INF("Ave temp (dC): %d", temp_decicentigrade);
+				LOG_DBG("Ave gyro: (%d, %d, %d)", gx, gy, gz);
+				LOG_DBG("Ave temp (dC): %d", temp_decicentigrade);
 			}
 		}
 		k_sleep(K_MSEC(1));
