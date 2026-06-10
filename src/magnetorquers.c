@@ -416,11 +416,6 @@ static int reset_magnetorquer(void)
 		return err;
 	}
 	k_sleep(K_MSEC(5));
-	err = gpio_pin_configure_dt(&mt_en, GPIO_INPUT); // float the pin; enable power stage
-	if (err) {
-		LOG_ERR("Error initializing GPIOS: %d", err);
-		return err;
-	}
 	err = gpio_pin_set_dt(&mt_en, true);
 	if (err) {
 		LOG_ERR("Error initializing GPIOS: %d", err);
@@ -433,6 +428,14 @@ static int reset_magnetorquer(void)
 		return err;
 	}
 	k_sleep(K_MSEC(5));
+#if 0
+	err = gpio_pin_configure_dt(&mt_en, GPIO_INPUT); // float the pin; enable power stage
+	if (err) {
+		LOG_ERR("Error initializing GPIOS: %d", err);
+		return err;
+	}
+	k_sleep(K_MSEC(5));
+#endif
 	return err;
 }
 
@@ -457,7 +460,9 @@ static int init_magnetorquer(void) {
 	// 3.3V * 3600 /4095 = 2.90V, not 3V.
 	// Leaving for now.
 	// TODO: find out if this is OK.
-	err = write_dac(3600U);
+
+	// R58 was stuffed wrong; need to change output to 0.0284 (value of 35)
+	err = write_dac(177U);
 	if (err) {
 		LOG_ERR("Error writing DAC: %d", err);
 		return err;
@@ -515,7 +520,7 @@ static void check_magnetorquer_fault(void)
 	int fault;
 
 	fault = gpio_pin_get_dt(&n_mt_en_fault);
-	if (fault) {
+	if (!fault) {
 		LOG_WRN("Fault on magnetorquer driver(s)!");
 
 		// TODO: ask Andrew if this is ok to do. It wasn't in the old code.
@@ -525,6 +530,63 @@ static void check_magnetorquer_fault(void)
 
 }
 
+#if 1
+static int handle_magnetorquer(void *p1, void *p2, void *p3)
+{
+	int err;
+
+	k_thread_name_set(magtqr_id, "magtqr_thread");
+
+	LOG_INF("Starting MAGNETORQUER thread");
+
+#if 0
+	err = init_dac();
+	if (err) {
+		return 0;
+	}
+	err = write_dac(1024U);
+	if (err) {
+		return 0;
+	}
+
+	err = init_pwm();
+	if (err) {
+		return 0;
+	}
+	err = init_adc();
+	if (err) {
+		return 0;
+	}
+#else
+	init_magnetorquer();
+#endif
+
+	err = set_pwm(0, 10);  // --> ADC2
+	err = set_pwm(1, 3000); // --> ADC0 and 1? CHA1
+	err = set_pwm(2, 10);  // --> ADC0
+
+	while (true) {
+		uint32_t adc_val;
+
+		err = acquire_adc_readings();
+		if (err) {
+			return 0;
+		}
+
+		for (int i = 0; i < get_num_adc_channels(); i++) {
+			err = read_adc(i, &adc_val);
+			if (err) {
+				continue;
+			}
+			LOG_INF("ADC num %d: %u mV", i, adc_val);
+		}
+
+		check_magnetorquer_fault();
+		k_msleep(1000);
+	}
+}
+
+#else
 static int handle_magnetorquer(void *p1, void *p2, void *p3)
 {
 	int err;
@@ -617,5 +679,6 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 		t_last = t_now;
 	}
 }
+#endif
 
 K_THREAD_DEFINE(magtqr_id, STACK_SIZE, handle_magnetorquer, NULL, NULL, NULL, PRIORITY, 0, 0);

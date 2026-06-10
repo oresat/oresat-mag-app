@@ -264,13 +264,13 @@
 };
 
 &lpadc0 {
-	pinctrl-0 = <&pinmux_lpadc0>;
 	pinctrl-names = "default";
-
+	/*pinctrl-0 = <&pinmux_lpadc0_1>;*/
+	/*pinctrl-0 = <&pinmux_lpadc0_0>;*/
+	pinctrl-0 = <&pinmux_lpadc0_0>, <&pinmux_lpadc0_1>;
 	#address-cells = <1>;
 	#size-cells = <0>;
 	status = "okay";
-
 	lpadc0_0: channel@0 {
 		reg = <0>;
 		zephyr,gain = "ADC_GAIN_1";

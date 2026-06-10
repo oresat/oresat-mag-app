@@ -17,7 +17,7 @@
 #include <zephyr/drivers/adc.h>
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(oresat_adc, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(oresat_adc, LOG_LEVEL_DBG);
 
 /* 1000 msec = 1 sec */
 #define ADC_SLEEP_TIME_MS 100 /* Use 5 to generate more data to graph samples that follow the DAC output */
