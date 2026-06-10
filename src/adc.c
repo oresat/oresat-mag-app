@@ -104,7 +104,7 @@ static adc_info adc_info_map[CHANNEL_COUNT];
 /* Options for the sequence sampling. */
 static const struct adc_sequence_options options = {
 	.extra_samplings = CONFIG_SEQUENCE_SAMPLES - 1,
-	.interval_us = 0,
+	.interval_us = 10,
 };
 
 static void init_adc_info(void)
@@ -142,11 +142,12 @@ static void init_adc_info(void)
 		padi->sequence.buffer = padi->channel_reading;
 		padi->sequence.buffer_size = sizeof(padi->channel_reading);
 		padi->sequence.resolution = CONFIG_SEQUENCE_RESOLUTION;
-		padi->sequence.oversampling = 0;
+		padi->sequence.oversampling = CONFIG_SEQUENCE_OVERSAMPLING;
 		padi->sequence.calibrate = 0;
 
-		LOG_DBG("ADC%d (%s): num_vrefs:%d, num_ch:%d, bitmask:0x%08x, buf:%p, buf_size:%d",
+		LOG_DBG("ADC%d (%s): num_vrefs:%u, num_ch:%u, bitmask:0x%08x, res:%u, ave:%u, buf:%p, buf_size:%d",
 				i, padi->dev->name, padi->num_vrefs, padi->num_ch, padi->sequence.channels,
+				padi->sequence.resolution, padi->sequence.oversampling,
 				padi->sequence.buffer, padi->sequence.buffer_size);
 
 		padi++;
