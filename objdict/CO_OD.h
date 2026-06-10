@@ -51,7 +51,7 @@
     typedef timeOfDay_t TIME_DIFFERENCE;
 /*******************************************************************************
    FILE INFO:
-      FileName:     adcs (3).xdd
+      FileName:     adcs (5).xdd
       FileVersion:  
       CreationTime: 8:06PM
       CreationDate: 06-07-2026
@@ -71,7 +71,7 @@
 /*******************************************************************************
    FEATURES
 *******************************************************************************/
-  #define CO_NO_SYNC                     1   //Associated objects: 1005-1007
+  #define CO_NO_SYNC                     0   //Associated objects: 1005-1007
   #define CO_NO_EMERGENCY                1   //Associated objects: 1014, 1015
   #define CO_NO_TIME                     0   //Associated objects: 1012, 1013
   #define CO_NO_SDO_SERVER               1   //Associated objects: 1200-127F
@@ -91,7 +91,7 @@
 /*******************************************************************************
    OBJECT DICTIONARY
 *******************************************************************************/
-   #define CO_OD_NoOfElements             53
+   #define CO_OD_NoOfElements             50
 
 
 /*******************************************************************************
@@ -114,7 +114,10 @@
                UNSIGNED8      highest_index_supported;
                UNSIGNED32     cob_id;
                UNSIGNED8      transmission_type;
+               UNSIGNED8      inhibit_time;
+               UNSIGNED8      compatibility_entry;
                UNSIGNED16     event_timer;
+               UNSIGNED8      sync_start_value;
                }              OD_RPDOCommunicationParameter_t;
 /*1600      */ typedef struct {
                UNSIGNED8      highest_index_supported;
@@ -151,6 +154,7 @@
                UNSIGNED8      highest_index_supported;
                VISIBLE_STRING hw_version[3];
                VISIBLE_STRING configs_version[32];
+               VISIBLE_STRING olaf_version[5];
                VISIBLE_STRING fw_version[5];
                }              OD_versions_t;
 /*3003      */ typedef struct {
@@ -240,15 +244,6 @@
         #define OD_1003_7_preDefinedErrorField_error_7              7
         #define OD_1003_8_preDefinedErrorField_error_8              8
 
-/*1005 */
-        #define OD_1005_COB_ID_SYNCMessage                          0x1005
-
-/*1006 */
-        #define OD_1006_communicationCyclePeriod                    0x1006
-
-/*1007 */
-        #define OD_1007_synchronousWindowLength                     0x1007
-
 /*1014 */
         #define OD_1014_cob_id_emergency_message                    0x1014
 
@@ -296,7 +291,10 @@
         #define OD_1400_0_RPDOCommunicationParameter_maxSubIndex    0
         #define OD_1400_1_RPDOCommunicationParameter_cob_id         1
         #define OD_1400_2_RPDOCommunicationParameter_transmission_type 2
+        #define OD_1400_3_RPDOCommunicationParameter_inhibit_time   3
+        #define OD_1400_4_RPDOCommunicationParameter_compatibility_entry 4
         #define OD_1400_5_RPDOCommunicationParameter_event_timer    5
+        #define OD_1400_6_RPDOCommunicationParameter_sync_start_value 6
 
 /*1600 */
         #define OD_1600_RPDOMappingParameter                        0x1600
@@ -575,6 +573,7 @@
         #define OD_3002_0_versions_maxSubIndex                      0
         #define OD_3002_1_versions_hw_version                       1
         #define OD_3002_2_versions_configs_version                  2
+        #define OD_3002_3_versions_olaf_version                     3
         #define OD_3002_4_versions_fw_version                       4
 
 /*3003 */
@@ -672,9 +671,6 @@ struct sCO_OD_RAM{
 /*1000      */ UNSIGNED32     device_type;
 /*1001      */ UNSIGNED8      errorRegister;
 /*1003      */ UNSIGNED32      preDefinedErrorField[8];
-/*1005      */ UNSIGNED32     COB_ID_SYNCMessage;
-/*1006      */ UNSIGNED32     communicationCyclePeriod;
-/*1007      */ UNSIGNED32     synchronousWindowLength;
 /*1014      */ UNSIGNED32     cob_id_emergency_message;
 /*1015      */ UNSIGNED16     inhibitTimeEMCY;
 /*1017      */ UNSIGNED16     producerHeartbeatTime;
@@ -765,18 +761,6 @@ extern struct sCO_OD_EEPROM CO_OD_EEPROM;
         #define ODA_preDefinedErrorField_error_6                    5
         #define ODA_preDefinedErrorField_error_7                    6
         #define ODA_preDefinedErrorField_error_8                    7
-
-/*1005, Data Type: UNSIGNED32 */
-        #define OD_COB_ID_SYNCMessage_idx                           0x1005
-        #define OD_COB_ID_SYNCMessage                               CO_OD_RAM.COB_ID_SYNCMessage
-
-/*1006, Data Type: UNSIGNED32 */
-        #define OD_communicationCyclePeriod_idx                     0x1006
-        #define OD_communicationCyclePeriod                         CO_OD_RAM.communicationCyclePeriod
-
-/*1007, Data Type: UNSIGNED32 */
-        #define OD_synchronousWindowLength_idx                      0x1007
-        #define OD_synchronousWindowLength                          CO_OD_RAM.synchronousWindowLength
 
 /*1014, Data Type: UNSIGNED32 */
         #define OD_cob_id_emergency_message_idx                     0x1014
