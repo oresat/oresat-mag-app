@@ -265,6 +265,7 @@ void print_debug_output(void) {
 
 		LOG_DBG( "================");
 		LOG_DBG( "CANOpen Data:");
+		LOG_DBG( "  CO_OD_RAM.versions.fw_version = %.5s", CO_OD_RAM.versions.fw_version);
 		LOG_DBG( "  CO_OD_RAM.gyroscope.pitch_rate = %d", CO_OD_RAM.gyroscope.pitch_rate);
 		LOG_DBG( "  CO_OD_RAM.gyroscope.yaw_rate = %d", CO_OD_RAM.gyroscope.yaw_rate);
 		LOG_DBG( "  CO_OD_RAM.gyroscope.roll_rate = %d", CO_OD_RAM.gyroscope.roll_rate);

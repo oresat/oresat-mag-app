@@ -16,12 +16,13 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/rtio/rtio.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/logging/log_ctrl.h>
 #include <canopennode.h>
 #include <CO_OD.h>
 
 #include "magnetometer.h"
 
-LOG_MODULE_REGISTER(magnetometer, CONFIG_LOG_DEFAULT_LEVEL);
+LOG_MODULE_REGISTER(magnetometer, LOG_LEVEL_INF);
 
 #define N		(8)
 #define M		(N/2)
@@ -50,9 +51,12 @@ static const struct gpio_dt_spec mag_ready = GPIO_DT_SPEC_GET(BP_NODE, mag_ready
 
 static struct sensor_three_axis_data mag_data[NUM_MAGS];
 
-#define MAG_THREAD_STACK_SIZE 2048
+#define MAG_THREAD_STACK_SIZE 4096
 #define MAG_THREAD_PRIORITY 0
 extern const k_tid_t mag_id;
+
+static bool mag_0_good;
+static bool mag_1_good;
 
 #if 0
 // FROM CHIBIOS CODE:
@@ -222,18 +226,23 @@ int init_mag(void)
 	if (check_rm3100_sensor(rm3100a_dev) == NULL) {
 		LOG_ERR("Could not find RM3100 magnetometer instance 'a'");
 		ret = -ENODEV;
+		mag_0_good = false;
+	} else {
+		mag_0_good = true;
 	}
 
 #if (NUM_MAGS > 1)
 	ret = device_init(rm3100b_dev);
 	if (ret < 0) {
 		LOG_ERR("Error initializing rm3100b device driver: %d", ret);
-		return ret;
-	}
-	if (check_rm3100_sensor(rm3100b_dev) == NULL) {
+	} else if (check_rm3100_sensor(rm3100b_dev) == NULL) {
 		LOG_ERR("Could not find RM3100 magnetometer instance 'b'");
 		ret = -ENODEV;
+		mag_1_good = false;
+	} else {
+		mag_1_good = true;
 	}
+	ret = 0; // run without it
 #endif
 
 	return ret;
@@ -255,14 +264,15 @@ int get_mag_reading(int mag_num, int16_t *x, int16_t *y, int16_t *z)
 
 static void handle_mag(void *p1, void *p2, void *p3)
 {
-	int err;
+	static uint32_t loop_count = 1;
+	int32_t rc = 0;
 
 	k_thread_name_set(mag_id, "mag_thread");
 
 	LOG_INF("Starting MAG thread");
 
-	err = init_mag();
-	if (err < 0) {
+	rc = init_mag();
+	if (rc < 0) {
 		return;
 	}
 
@@ -271,62 +281,67 @@ static void handle_mag(void *p1, void *p2, void *p3)
 	uint8_t buf_b[READINGS_BUFFER_SIZE] = {0};
 #endif
 
-	static uint32_t loop_count = 1;
-	int32_t rc = 0;
-
 	while (true) {
 		if (!gpio_pin_get_dt(&n_mag_fault)) {
 			LOG_WRN("MAX892 mag power fault!");
 		}
 
-		rc = sensor_read(&iodev, &ctx, buf, 128);
-		if (rc != 0) {
-				LOG_ERR("%s: sensor_read() failed: %d", rm3100a_dev->name, rc);
-				break;
+		if (mag_0_good) {
+			LOG_DBG("Reading mag 0");
+			rc = sensor_read(&iodev, &ctx, buf, 128);
+			if (rc != 0) {
+					LOG_ERR("%s: sensor_read() failed: %d", rm3100a_dev->name, rc);
+					break;
+			}
+
+			const struct sensor_decoder_api *decoder;
+			uint32_t mag_fit = 0;
+
+			LOG_DBG("Getting mag 0 decoder");
+			rc = sensor_get_decoder(rm3100a_dev, &decoder);
+			if (rc != 0) {
+					LOG_ERR("%s: sensor_get_decode() failed: %d", rm3100a_dev->name, rc);
+					break;
+			}
+
+			LOG_DBG("Decoding mag 0");
+			decoder->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_XYZ, 0},
+											&mag_fit, 1, &mag_data[0]);
+
+//			LOG_INF(PRIsensor_three_axis_data,
+//				PRIsensor_three_axis_data_arg(mag_data[0], 0));
 		}
-
-		const struct sensor_decoder_api *decoder;
-
-		rc = sensor_get_decoder(rm3100a_dev, &decoder);
-		if (rc != 0) {
-				LOG_ERR("%s: sensor_get_decode() failed: %d", rm3100a_dev->name, rc);
-				break;
-		}
-
-		uint32_t mag_fit = 0;
-
-		decoder->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_XYZ, 0},
-										&mag_fit, 1, &mag_data[0]);
-
-		LOG_INF(PRIsensor_three_axis_data,
-			PRIsensor_three_axis_data_arg(mag_data[0], 0));
 
 //------------------------------------------------------
 // For magnetometer b:
 //------------------------------------------------------
 
 #if (NUM_MAGS > 1)
-		rc = sensor_read(&iodev_b, &ctx_b, buf_b, 128);
-		if (rc != 0) {
-				LOG_ERR("%s: sensor_read() for mag1 failed, err %d", rm3100b_dev->name, rc);
-				break;
+		if (mag_1_good) {
+			LOG_DBG("Reading mag 1");
+			rc = sensor_read(&iodev_b, &ctx_b, buf_b, 128);
+			if (rc != 0) {
+					LOG_ERR("%s: sensor_read() for mag1 failed, err %d", rm3100b_dev->name, rc);
+					break;
+			}
+
+			const struct sensor_decoder_api *decoder_b;
+			uint32_t mag_fit_b = 0;
+
+			LOG_DBG("Getting mag 1 decoder");
+			rc = sensor_get_decoder(rm3100b_dev, &decoder_b);
+			if (rc != 0) {
+					LOG_ERR("%s: sensor_get_decode() failed: %d", rm3100b_dev->name, rc);
+					break;
+			}
+
+			LOG_DBG("Decoding mag 1");
+			decoder_b->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_XYZ, 0},
+											&mag_fit_b, 1, &mag_data[1]);
+
+//			LOG_INF(PRIsensor_three_axis_data,
+//				PRIsensor_three_axis_data_arg(mag_data[1], 0));
 		}
-
-		const struct sensor_decoder_api *decoder_b;
-
-		rc = sensor_get_decoder(rm3100b_dev, &decoder_b);
-		if (rc != 0) {
-				LOG_ERR("%s: sensor_get_decode() failed: %d", rm3100b_dev->name, rc);
-				break;
-		}
-
-		uint32_t mag1_fit = 0;
-
-		decoder->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_XYZ, 0},
-										&mag_fit, 1, &mag_data[1]);
-
-		LOG_INF(PRIsensor_three_axis_data,
-			PRIsensor_three_axis_data_arg(mag_data[1], 0));
 #endif
 
 		k_msleep(RM3100_DEMO_SLEEP_TIME_MS);

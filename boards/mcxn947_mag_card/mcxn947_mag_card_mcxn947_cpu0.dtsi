@@ -99,9 +99,9 @@
 			status = "okay";
 			zephyr,deferred-init;
 	};
-	rm3100b: rm3100@21 {
+	rm3100b: rm3100@22 {
 			compatible = "pni,rm3100";
-			reg = <0x21>;
+			reg = <0x22>;
 			odr = <RM3100_DT_ODR_600>;
 			status = "okay";
 			zephyr,deferred-init;
