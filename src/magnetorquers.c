@@ -10,6 +10,8 @@
 #include <zephyr/logging/log.h>
 #include <canopennode.h>
 #include <CO_OD.h>
+#include <version.h>
+#include <app_version.h>
 
 #include "dac.h"
 #include "pwm.h"
@@ -172,8 +174,18 @@ static int16_t raw_to_milligauss(int16_t raw)
 // $ cansend can0 610#23.07.40.05.34.12.00.00
 // write current_z_setpoint to 69:
 // $ cansend can0 610#23.07.40.06.45.00.00.00
+//
+// To read an object, send this:
+//  			   ID RD COBID --- SUB ---
+// $ cansend can0 610#40.00.40.01.00.00.00
+// to read fw_version:
+// $ cansend can0 610#40.02.30.03.00.00.00
 
-static void handle_can_open_data(void) {
+static void handle_can_open_data(void)
+{
+	size_t ver_size = sizeof(CO_OD_RAM.versions.fw_version);
+
+	strncpy(CO_OD_RAM.versions.fw_version, &APP_VERSION_STRING[6], ver_size);
 
 	g_adcs_data.mt_pwm_data[0].target_pwm_percent = map_current_uA_to_pwm_duty_cycle(CO_OD_RAM.magnetorquer.current_x_setpoint * 100, 0);
 	g_adcs_data.mt_pwm_data[1].target_pwm_percent = map_current_uA_to_pwm_duty_cycle(CO_OD_RAM.magnetorquer.current_y_setpoint * 100, 1);

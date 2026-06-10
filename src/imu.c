@@ -4,6 +4,7 @@
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/sys/util.h>
+#include <zephyr/settings/settings.h>
 #include <canopennode.h>
 #include <CO_OD.h>
 
@@ -53,11 +54,14 @@ LOG_MODULE_REGISTER(imu, LOG_LEVEL_INF);
 #define SOFT_RESET_READY_TRIES 100
 #define DATA_READY_TRIES 500
 #define HIST_SIZE 10
+#define MAX_I2C_RECOVERY_RETRIES 10
+#define MAX_RECOVERY_BOOTS 10
 
 static const struct device *i2c;
 static uint8_t imu_addr;
 static uint8_t prev_bank;
 static bool imu_is_ready;
+static int rec_count;
 
 #define IMU_THREAD_STACK_SIZE 2048
 #define IMU_THREAD_PRIORITY 0
@@ -142,11 +146,41 @@ bool is_imu_ready(void)
 	return imu_is_ready;
 }
 
+static uint8_t load_recovery_count(void)
+{
+	int rc;
+	uint8_t recovery_count = 0;
+
+	settings_load();
+
+	rc = settings_load_one("recovery_count", (void *)&recovery_count, sizeof(recovery_count));
+	if (rc < 0) {
+		LOG_ERR("Error loading recovery_count from settings: %d", rc);
+	}
+	if (!recovery_count) {
+		recovery_count = 0;
+	}
+	return recovery_count;
+}
+
+static int store_recovery_count(uint8_t recovery_count)
+{
+	int rc;
+
+	rc = settings_save_one("recovery_count", &recovery_count, sizeof(recovery_count));
+	if (rc < 0) {
+		LOG_ERR("Error saving recovery_count to settings: %d", rc);
+	}
+	return rc;
+}
+
 static int reset_imu(void)
 {
 	int ret;
 	int attempt;
 	uint8_t int_status;
+
+	rec_count = load_recovery_count();
 
 	for (attempt = 1; attempt < SOFT_RESET_RETRIES; attempt++) {
 		ret = imu_write_reg(REG_DEVICE_CONFIG, BIT_SOFT_RESET_CONFIG);
@@ -181,7 +215,17 @@ static int reset_imu(void)
 	}
 
 	if (ret < 0) {
-		__ASSERT(ret < 0, "Giving up on soft reset of IMU. Rebooting.");
+		if (rec_count < MAX_RECOVERY_BOOTS) {
+			store_recovery_count(rec_count + 1);
+			settings_commit();
+			k_sleep(K_MSEC(500)); // give settings time to be written to flash
+			__ASSERT(ret < 0, "Giving up on soft reset of IMU. Rebooting.");
+		} else {
+			LOG_ERR("Cannot recover i2c bus after 10 reboot attempts. Giving up.");
+		}
+	} else if (rec_count) {
+		LOG_INF("Resetting recovery count. Recovery successful");
+		store_recovery_count(0); // reset since we're good
 	}
 
 	return ret;
@@ -516,6 +560,17 @@ static void handle_imu(void *p1, void *p2, void *p3)
 	k_thread_name_set(imu_id, "imu_thread");
 
 	LOG_INF("Starting IMU thread");
+
+	err = settings_subsys_init();
+	if (err) {
+		LOG_ERR("settings subsys initialization: fail (err %d)", err);
+	}
+
+	rec_count = load_recovery_count();
+	LOG_INF("  I2C recovery count: %d", rec_count);
+	if (rec_count >= MAX_RECOVERY_BOOTS) {
+		LOG_ERR("Unable to recover i2c bus after 10 resets. Will stop trying.");
+	}
 
 	err = init_imu();
 	if (err < 0) {
