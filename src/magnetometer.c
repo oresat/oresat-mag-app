@@ -68,24 +68,7 @@ typedef enum {
 	EC_MAG_NONE,
 } end_card_magnetometoer_t;
 
-
-static const I2CConfig mmc5983ma_i2ccfg = {
-    STM32_TIMINGR_PRESC(0xBU) |
-    STM32_TIMINGR_SCLDEL(0x4U) | STM32_TIMINGR_SDADEL(0x2U) |
-    STM32_TIMINGR_SCLH(0xFU)  | STM32_TIMINGR_SCLL(0x13U),
-    0,
-    0
-};
-
-static const MMC5983MAConfig mmc5983ma_generic_config = {
-	.i2cp = &I2CD1,
-	.i2ccfg = &mmc5983ma_i2ccfg
-};
-
-
 typedef struct {
-	MMC5983MADriver driver;
-	mmc5983ma_data_t data;
 	volatile bool is_initialized;
 	volatile bool is_working;
 } magnetometer_data_struct_t;
@@ -100,18 +83,7 @@ typedef struct  {
 	magnetometer_data_struct_t magetometer_data[4];
 } adcs_data_t;
 
-
 adcs_data_t g_adcs_data;
-
-static const BMI088Config imucfg = {
-    .i2cp = &I2CD1,
-    .i2ccfg = &i2ccfg,
-    .gyro_saddr = BMI088_GYRO_SADDR,
-    .acc_saddr = BMI088_ACC_SADDR,
-};
-
-static BMI088Driver imudev;
-
 #endif
 
 //----------------------------------------------------------------------
@@ -138,10 +110,12 @@ static int gpios_init(void)
     return ret;
 }
 
+#if 0
 static void stop_end_cap_magnetometers(void) {
 	//Disable power to the end cap magnetometers
 	gpio_pin_set_dt(&n_mag_en, false);
 }
+#endif
 
 static void start_end_cap_magnetometers(void) {
 	gpio_pin_set_dt(&n_mag_en, true);
@@ -205,8 +179,10 @@ int init_mag(void)
 		k_msleep(500);
 		LOG_INF("Turning on mag power");
 		k_msleep(10);
-		gpio_pin_set_dt(&n_mag_en, 1); // enable the MAX892 mag power switch and breaker
+
+		start_end_cap_magnetometers(); // enable the MAX892 mag power switch and breaker
 		k_msleep(100);
+
 		if (!gpio_pin_get_dt(&n_mag_fault)) {
 			LOG_WRN("Enabled MAX892 mag power, but got a fault. Retry %u", count++);
 		} else {
@@ -307,9 +283,6 @@ static void handle_mag(void *p1, void *p2, void *p3)
 			LOG_DBG("Decoding mag 0");
 			decoder->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_XYZ, 0},
 											&mag_fit, 1, &mag_data[0]);
-
-//			LOG_INF(PRIsensor_three_axis_data,
-//				PRIsensor_three_axis_data_arg(mag_data[0], 0));
 		}
 
 //------------------------------------------------------
@@ -338,9 +311,6 @@ static void handle_mag(void *p1, void *p2, void *p3)
 			LOG_DBG("Decoding mag 1");
 			decoder_b->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_XYZ, 0},
 											&mag_fit_b, 1, &mag_data[1]);
-
-//			LOG_INF(PRIsensor_three_axis_data,
-//				PRIsensor_three_axis_data_arg(mag_data[1], 0));
 		}
 #endif
 
