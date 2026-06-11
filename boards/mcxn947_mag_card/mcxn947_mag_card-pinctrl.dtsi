@@ -66,7 +66,8 @@
 /* MT_Y_I_SENSE */
 	pinmux_lpadc0_1: pinmux_lpadc0_1 {
 			pinmux = <ADC0_B0_PIO4_1>;
-			/* pinmux = <ADC0_A1_PIO4_15>; */
+			/* from unnecessary rework:
+			   pinmux = <ADC0_A1_PIO4_15>; */
 			slew-rate = "fast";
 			drive-strength = "low";
 	};

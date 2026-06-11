@@ -180,10 +180,20 @@ static int16_t raw_to_milligauss(int16_t raw)
 // $ cansend can0 610#40.00.40.01.00.00.00
 // to read fw_version:
 // $ cansend can0 610#40.02.30.03.00.00.00
+//
+// oresat-configs sdo [-h] [--oresat {0,0.5,1}] BUS NODE MODE INDEX SUBINDEX [VALUE]
+// so for you oresat-configs sdo can0 battery_1 read <index> <subindex>
+// oresat-configs sdo can0 adcs read  versions fw_version
+// oresat-configs sdo can0 adcs read temperature foo
+// oresat-configs sdo can0 adcs read magnetorquer pwm_x
+// oresat-configs sdo can0 adcs read magnetorquer current_x
+// oresat-configs sdo can0 adcs write magnetorquer current_x_setpoint 1000
 
 static void handle_can_open_data(void)
 {
 	size_t ver_size = sizeof(CO_OD_RAM.versions.fw_version);
+
+    CO_LOCK_OD();
 
 	strncpy(CO_OD_RAM.versions.fw_version, &APP_VERSION_STRING[6], ver_size);
 
@@ -254,6 +264,7 @@ static void handle_can_open_data(void)
 		CO_OD_RAM.min_z_magnetometer_2.y = INT16_MAX;
 		CO_OD_RAM.min_z_magnetometer_2.z = INT16_MAX;
 	}
+    CO_UNLOCK_OD();
 }
 
 void print_debug_output(void) {
@@ -313,9 +324,9 @@ void print_debug_output(void) {
 		for (int i = 0; i < 3; i++) {
 			mt_pwm_phase_data_t *data = &g_adcs_data.mt_pwm_data[i];
 			LOG_DBG( "  measured_i_sense_voltage[%d] = %d uA, %u mV",
-							i,
-							data->current_feedback_measurement_uA,
-							(uint32_t) (data->current_feedback_measurement_V * 1000));
+					i,
+					data->current_feedback_measurement_uA,
+					(uint32_t) (data->current_feedback_measurement_V * 1000));
 		}
 		//LOG_DBG( "  CO_EM_GENERIC_ERROR:  %u", CO_isError(CO->em, CO_EM_GENERIC_ERROR));
 	}
@@ -531,7 +542,8 @@ static void check_magnetorquer_fault(void)
 
 }
 
-#if 1
+#if 0
+// test code
 static int handle_magnetorquer(void *p1, void *p2, void *p3)
 {
 	int err;
@@ -540,31 +552,11 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 
 	LOG_INF("Starting MAGNETORQUER thread");
 
-#if 0
-	err = init_dac();
-	if (err) {
-		return 0;
-	}
-	err = write_dac(1024U);
-	if (err) {
-		return 0;
-	}
-
-	err = init_pwm();
-	if (err) {
-		return 0;
-	}
-	err = init_adc();
-	if (err) {
-		return 0;
-	}
-#else
 	init_magnetorquer();
-#endif
 
 	int32_t x_pwm_pct = 10;
 	int32_t y_pwm_pct = 10;
-	int32_t z_pwm_pct = -1000;
+	int32_t z_pwm_pct = 0;
 
 	set_pwm_phase(0, x_pwm_pct < 0);
 	set_pwm_phase(1, y_pwm_pct < 0);
@@ -590,6 +582,9 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 		}
 
 		check_magnetorquer_fault();
+
+		handle_can_open_data();
+
 		k_msleep(1000);
 	}
 }

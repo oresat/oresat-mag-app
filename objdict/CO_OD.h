@@ -677,7 +677,6 @@ struct sCO_OD_RAM{
 /*1018      */ OD_identity_t   identity;
 /*1019      */ UNSIGNED8      synchronousCounterOverflowValue;
 /*1200      */ OD_SDOServerParameter_t SDOServerParameter[1];
-/*1802      */ OD_TPDOCommunicationParameter_t TPDOCommunicationParameter[10];
 
 // firmware update OD indexes:
 /*1F50      */ DOMAIN         program_data[1];
@@ -707,20 +706,6 @@ struct sCO_OD_RAM{
                UNSIGNED32     LastWord;
 };
 
-/***** Structure for PERSIST_COMM variables ********************************************/
-struct sCO_OD_PERSIST_COMM{
-               UNSIGNED32     FirstWord;
-
-/*1016      */ UNSIGNED32      consumerHeartbeatTime[1];
-/*1029      */ UNSIGNED8       errorBehavior[1];
-/*1400      */ OD_RPDOCommunicationParameter_t RPDOCommunicationParameter[1];
-/*1600      */ OD_RPDOMappingParameter_t RPDOMappingParameter[1];
-/*1800      */ OD_TPDOCommunicationParameter_t TPDOCommunicationParameter[10];
-/*1A00      */ OD_TPDOMappingParameter_t TPDOMappingParameter[10];
-
-               UNSIGNED32     LastWord;
-};
-
 /***** Structure for ROM variables ********************************************/
 struct sCO_OD_ROM{
                UNSIGNED32     FirstWord;
@@ -737,14 +722,28 @@ struct sCO_OD_EEPROM{
                UNSIGNED32     LastWord;
 };
 
+/***** Structure for PERSIST_COMM variables ********************************************/
+struct sCO_OD_PERSIST_COMM{
+               UNSIGNED32     FirstWord;
+
+/*1016      */ UNSIGNED32      consumerHeartbeatTime[1];
+/*1029      */ UNSIGNED8       errorBehavior[1];
+/*1400      */ OD_RPDOCommunicationParameter_t RPDOCommunicationParameter[1];
+/*1600      */ OD_RPDOMappingParameter_t RPDOMappingParameter[1];
+/*1800      */ OD_TPDOCommunicationParameter_t TPDOCommunicationParameter[10];
+/*1A00      */ OD_TPDOMappingParameter_t TPDOMappingParameter[10];
+
+               UNSIGNED32     LastWord;
+};
+
 /***** Declaration of Object Dictionary variables *****************************/
 extern struct sCO_OD_RAM CO_OD_RAM;
-
-extern struct sCO_OD_PERSIST_COMM CO_OD_PERSIST_COMM;
 
 extern struct sCO_OD_ROM CO_OD_ROM;
 
 extern struct sCO_OD_EEPROM CO_OD_EEPROM;
+
+extern struct sCO_OD_PERSIST_COMM CO_OD_PERSIST_COMM;
 
 /*******************************************************************************
    ALIASES FOR OBJECT DICTIONARY VARIABLES

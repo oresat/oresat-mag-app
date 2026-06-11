@@ -186,7 +186,7 @@
 };
 
 &mbox {
-	status = "okay";
+	status = "disabled";
 };
 
 &gpio4 {
@@ -206,7 +206,7 @@
 };
 
 &edma0 {
-	status = "okay";
+	status = "disabled";
 };
 
 &wwdt0 {
@@ -218,7 +218,7 @@
 };
 
 &ctimer0 {
-	status = "okay";
+	status = "disabled";
 };
 
 &vref {
@@ -289,6 +289,7 @@
 		zephyr,resolution = <12>;
 		zephyr,oversampling = <7>;
 		zephyr,input-positive = <MCUX_LPADC_CH0B>;
+		/* from unnessessary rework: <MCUX_LPADC_CH1A>; */
 		/delete-property/ zephyr,differential;
 	};
 };
