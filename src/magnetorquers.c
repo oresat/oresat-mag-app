@@ -28,6 +28,7 @@ LOG_MODULE_REGISTER(magnetorquers, CONFIG_LOG_DEFAULT_LEVEL);
 #define PRIORITY 7
 
 #define ITERATION_PERIOD 5 // ms
+#define MT_ILIM_DAC_VALUE 177U // DAC value to set current limit for magnetorquers
 
 extern const k_tid_t magtqr_id;
 
@@ -474,7 +475,8 @@ static int init_magnetorquer(void) {
 	// TODO: find out if this is OK.
 
 	// R58 was stuffed wrong; need to change output to 0.0284 (value of 35)
-	err = write_dac(177U);
+	LOG_DBG("Set MT_ILIM; DAC = %d", MT_ILIM_DAC_VALUE);
+	err = write_dac(MT_ILIM_DAC_VALUE);
 	if (err) {
 		LOG_ERR("Error writing DAC: %d", err);
 		return err;
