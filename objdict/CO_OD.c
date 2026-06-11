@@ -84,7 +84,7 @@ struct sCO_OD_PERSIST_COMM CO_OD_PERSIST_COMM = {
 
 /*1016*/ {0x0000L},
 /*1029*/ {0x0L},
-/*1400*/ {{0x6L, 0x0180L, 0xFEL, 0x0L, 0x0L, 0x00, 0x0L}},
+/*1400*/ {{0x2L, 0x0180L, 0xFEL, /*0x0L, 0x0L, 0x00, 0x0L*/}},
 /*1600*/ {{0x1L, 0x20100040L, 0x0000L, 0x0000L, 0x0000L, 0x0000L, 0x0000L, 0x0000L, 0x0000L}},
 /*1800*/ {{0x6L, 0x400001B8L, 0xFEL, 0x00, 0x0L, 0x3E8, 0x0L},
 /*1801*/  {0x6L, 0x400002B8L, 0xFEL, 0x00, 0x0L, 0x3E8, 0x0L}},
@@ -147,10 +147,10 @@ struct sCO_OD_EEPROM CO_OD_EEPROM = {
            {(void*)&CO_OD_PERSIST_COMM.RPDOCommunicationParameter[0].highest_index_supported, 0x07, 0x1 },
            {(void*)&CO_OD_PERSIST_COMM.RPDOCommunicationParameter[0].cob_id, 0x8F, 0x4 },
            {(void*)&CO_OD_PERSIST_COMM.RPDOCommunicationParameter[0].transmission_type, 0x0F, 0x1 },
-           {(void*)&CO_OD_PERSIST_COMM.RPDOCommunicationParameter[0].inhibit_time, 0x0F, 0x1 },
+           /*{(void*)&CO_OD_PERSIST_COMM.RPDOCommunicationParameter[0].inhibit_time, 0x0F, 0x1 },
            {(void*)&CO_OD_PERSIST_COMM.RPDOCommunicationParameter[0].compatibility_entry, 0x0F, 0x1 },
            {(void*)&CO_OD_PERSIST_COMM.RPDOCommunicationParameter[0].event_timer, 0x8F, 0x2 },
-           {(void*)&CO_OD_PERSIST_COMM.RPDOCommunicationParameter[0].sync_start_value, 0x0F, 0x1 },
+           {(void*)&CO_OD_PERSIST_COMM.RPDOCommunicationParameter[0].sync_start_value, 0x0F, 0x1 }, */
 };
 
 /*0x1600*/ const CO_OD_entryRecord_t OD_record1600[9] = {

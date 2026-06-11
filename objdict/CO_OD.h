@@ -114,10 +114,10 @@
                UNSIGNED8      highest_index_supported;
                UNSIGNED32     cob_id;
                UNSIGNED8      transmission_type;
-               UNSIGNED8      inhibit_time;
-               UNSIGNED8      compatibility_entry;
-               UNSIGNED16     event_timer;
-               UNSIGNED8      sync_start_value;
+               //UNSIGNED8      inhibit_time;
+               //UNSIGNED8      compatibility_entry;
+               //UNSIGNED16     event_timer;
+               //UNSIGNED8      sync_start_value;
                }              OD_RPDOCommunicationParameter_t;
 /*1600      */ typedef struct {
                UNSIGNED8      highest_index_supported;
