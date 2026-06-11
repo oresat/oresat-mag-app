@@ -20,7 +20,7 @@
 LOG_MODULE_REGISTER(oresat_adc, LOG_LEVEL_DBG);
 
 /* 1000 msec = 1 sec */
-#define ADC_SLEEP_TIME_MS 100 /* Use 5 to generate more data to graph samples that follow the DAC output */
+#define ADC_SLEEP_TIME_MS 50 /* Use 5 to generate more data to graph samples that follow the DAC output */
 
 #define MAX_ADC_READ_TRIES 10
 
@@ -103,6 +103,10 @@ typedef struct adc_info {
 
 static adc_info adc_info_map[CHANNEL_COUNT];
 
+// Renumber the outside interface to match reality (adc number 0 and 2 seem swapped somewhere.
+// TODO: fix.
+static int log_to_phys[CHANNEL_COUNT];
+
 /* Options for the sequence sampling. */
 static const struct adc_sequence_options options = {
 	.extra_samplings = CONFIG_SEQUENCE_SAMPLES - 1,
@@ -154,9 +158,14 @@ static void init_adc_info(void)
 
 		padi++;
 	}
+	if (adc_index == 3) {
+		log_to_phys[0] = 2;
+		log_to_phys[1] = 1;
+		log_to_phys[2] = 0;
+	}
 	for (i = 0; i < adc_index; i++) {
-		LOG_DBG("adc_info_map[%d]: padi:%p, dev:%d",
-				i, adc_info_map[i].adcdev, adc_info_map[i].adc_dev_num);
+		LOG_DBG("adc_info_map[%d]: padi:%p, logidx:%d, physidx:%d, dev:%d",
+				i, adc_info_map[i].adcdev, i, log_to_phys[i], adc_info_map[i].adc_dev_num);
 	}
 }
 
@@ -246,7 +255,7 @@ int acquire_adc_readings(void)
 	return err;
 }
 
-int read_adc(unsigned int adc_num, int32_t *val_mv)
+int read_adc(unsigned int log_adc_num, int32_t *val_mv)
 {
 	int err;
 	int32_t raw;
@@ -255,18 +264,19 @@ int read_adc(unsigned int adc_num, int32_t *val_mv)
 	int32_t val_sum = 0;
 	adc_info *info;
 	adc_dev_info *padi;
+	int phys_adc_num = log_to_phys[log_adc_num];
 
-	if (adc_num >= CHANNEL_COUNT) {
-		LOG_ERR("Incorrect adc number set:%u; max is:%u", adc_num, CHANNEL_COUNT);
+	if (log_adc_num >= CHANNEL_COUNT) {
+		LOG_ERR("Incorrect adc number set:%u; max is:%u", log_adc_num, CHANNEL_COUNT);
 		return -ENODEV;
 	}
-	info = &adc_info_map[adc_num];
+	info = &adc_info_map[phys_adc_num];
 	padi = info->adcdev;
 
 	*val_mv = 0;
 
-	LOG_DBG("Reading adc_num:%d, dev_num:%d (%s), ch_num:%d",
-			adc_num, info->adc_dev_num, padi->dev->name, info->ch_num);
+	LOG_DBG("Reading log_adc_num:%d, phys_num:%d, dev_num:%d (%s), ch_num:%d",
+			log_adc_num, phys_adc_num, info->adc_dev_num, padi->dev->name, info->ch_num);
 
 	for (size_t sample_index = 0U; sample_index < CONFIG_SEQUENCE_SAMPLES; sample_index++) {
 

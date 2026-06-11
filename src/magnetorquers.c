@@ -340,6 +340,7 @@ static int set_pwm_phase(int i, bool level)
 		LOG_ERR("Incorrect axis selected: %d", i);
 		return -EINVAL;
 	}
+	LOG_DBG("set MT_%d_PHASE to %d", i, level);
 	ret = gpio_pin_set_dt(spec, level);
 	if (ret) {
 		LOG_ERR("Unable to set phase pin level: %d", ret);
@@ -373,7 +374,7 @@ static int set_pwm_output(void) {
 					new_state = false;
 				}
 				if (g_adcs_data.mt_pwm_data[i].phase_state != new_state) {
-					ret = set_pwm_phase(i, true);
+					ret = set_pwm_phase(i, new_state);
 					if (ret) {
 						err = ret;
 						continue; // could cause guidance issues? mismatched phase and pwm value?
@@ -401,37 +402,37 @@ static int reset_magnetorquer(void)
 
 	err = gpio_pin_configure_dt(&mt_en, GPIO_OUTPUT_INACTIVE); // drive the pin low -- disable power stage
 	if (err) {
-		LOG_ERR("Error initializing GPIOS: %d", err);
+		LOG_ERR("Error configuring mt_en output low: %d", err);
 		return err;
 	}
 	err = gpio_pin_set_dt(&mt_en, false);
 	if (err) {
-		LOG_ERR("Error initializing GPIOS: %d", err);
+		LOG_ERR("Error setting mt_en low: %d", err);
 		return err;
 	}
 
 	err = gpio_pin_set_dt(&n_mt_stby_rst, false); // goto low power/reset mode
 	if (err) {
-		LOG_ERR("Error initializing GPIOS: %d", err);
+		LOG_ERR("Error setting n_mt_stby_rst low: %d", err);
 		return err;
 	}
 	k_sleep(K_MSEC(5));
 	err = gpio_pin_set_dt(&mt_en, true);
 	if (err) {
-		LOG_ERR("Error initializing GPIOS: %d", err);
+		LOG_ERR("Error setting mt_en high: %d", err);
 		return err;
 	}
 	k_sleep(K_MSEC(5));
 	err = gpio_pin_set_dt(&n_mt_stby_rst, true); // activate
 	if (err) {
-		LOG_ERR("Error initializing GPIOS: %d", err);
+		LOG_ERR("Error setting n_mt_stby_rst high: %d", err);
 		return err;
 	}
 	k_sleep(K_MSEC(5));
 #if 0
 	err = gpio_pin_configure_dt(&mt_en, GPIO_INPUT); // float the pin; enable power stage
 	if (err) {
-		LOG_ERR("Error initializing GPIOS: %d", err);
+		LOG_ERR("Error floating mt_en: %d", err);
 		return err;
 	}
 	k_sleep(K_MSEC(5));
@@ -470,44 +471,44 @@ static int init_magnetorquer(void) {
 
 	err = init_pwm();
 	if (err) {
-		LOG_ERR("Error initializing GPIOS: %d", err);
+		LOG_ERR("Error initializing PWMs: %d", err);
 		return err;
 	}
 	err = init_adc();
 	if (err) {
-		LOG_ERR("Error initializing GPIOS: %d", err);
+		LOG_ERR("Error initializing ADCs: %d", err);
 		return err;
 	}
 
 	err = gpio_pin_configure_dt(&mt_en, GPIO_OUTPUT_INACTIVE); // drive the pin low
 	if (err) {
-		LOG_ERR("Error initializing GPIOS: %d", err);
+		LOG_ERR("Error configuring mt_en output low: %d", err);
 		return err;
 	}
 	err = gpio_pin_set_dt(&mt_en, false);
 	if (err) {
-		LOG_ERR("Error initializing GPIOS: %d", err);
+		LOG_ERR("Error setting mt_en low: %d", err);
 		return err;
 	}
 	err = gpio_pin_set_dt(&n_mt_stby_rst, true);
 	if (err) {
-		LOG_ERR("Error initializing GPIOS: %d", err);
+		LOG_ERR("Error setting n_mt_stby_rst high: %d", err);
 		return err;
 	}
 
 	err = set_pwm_phase(0, false);
 	if (err) {
-		LOG_ERR("Error initializing GPIOS: %d", err);
+		LOG_ERR("Error setting x_mt_phase low: %d", err);
 		return err;
 	}
 	err = set_pwm_phase(1, false);
 	if (err) {
-		LOG_ERR("Error initializing GPIOS: %d", err);
+		LOG_ERR("Error setting y_mt_phase low: %d", err);
 		return err;
 	}
 	err = set_pwm_phase(2, false);
 	if (err) {
-		LOG_ERR("Error initializing GPIOS: %d", err);
+		LOG_ERR("Error setting z_mt_phase low: %d", err);
 		return err;
 	}
 
@@ -561,9 +562,16 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 	init_magnetorquer();
 #endif
 
-	err = set_pwm(0, 1000);  // --> ADC
-	err = set_pwm(1, 1000);  // --> ADC1
-	err = set_pwm(2, 1000);  // --> ADC2
+	int32_t x_pwm_pct = 10;
+	int32_t y_pwm_pct = 10;
+	int32_t z_pwm_pct = -1000;
+
+	set_pwm_phase(0, x_pwm_pct < 0);
+	set_pwm_phase(1, y_pwm_pct < 0);
+	set_pwm_phase(2, z_pwm_pct < 0);
+	err = set_pwm(0, abs(x_pwm_pct));  // --> ADC
+	err = set_pwm(1, abs(y_pwm_pct));  // --> ADC1
+	err = set_pwm(2, abs(z_pwm_pct));  // --> ADC2
 
 	while (true) {
 		uint32_t adc_val;
