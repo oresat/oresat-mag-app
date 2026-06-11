@@ -56,12 +56,14 @@
 		};
 	};
 
-/* MT_Z_I_SENSE, MT_Y_I_SENSE */
+/* MT_Z_I_SENSE */
 	pinmux_lpadc0_0: pinmux_lpadc0_0 {
 			pinmux = <ADC0_A0_PIO4_0>;
 			slew-rate = "fast";
 			drive-strength = "low";
 	};
+
+/* MT_Y_I_SENSE */
 	pinmux_lpadc0_1: pinmux_lpadc0_1 {
 			pinmux = <ADC0_B0_PIO4_1>;
 			/* pinmux = <ADC0_A1_PIO4_15>; */

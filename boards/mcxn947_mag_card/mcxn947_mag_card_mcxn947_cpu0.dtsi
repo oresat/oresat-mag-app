@@ -265,31 +265,29 @@
 
 &lpadc0 {
 	pinctrl-names = "default";
-	/*pinctrl-0 = <&pinmux_lpadc0_1>;*/
-	/*pinctrl-0 = <&pinmux_lpadc0_0>;*/
 	pinctrl-0 = <&pinmux_lpadc0_0>, <&pinmux_lpadc0_1>;
 	#address-cells = <1>;
 	#size-cells = <0>;
 	status = "okay";
-	lpadc0_0: channel@0 {
+	lpadc0_0: channel@0 { /* Z */
 		reg = <0>;
 		zephyr,gain = "ADC_GAIN_1";
 		zephyr,reference = "ADC_REF_EXTERNAL0";
 		zephyr,vref-mv = <3300>;
 		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS,2)>;
 		zephyr,resolution = <12>;
-		zephyr,oversampling = <5>;
+		zephyr,oversampling = <7>;
 		zephyr,input-positive = <MCUX_LPADC_CH0A>;
 		/delete-property/ zephyr,differential;
 	};
-	lpadc0_1: channel@1 {
+	lpadc0_1: channel@1 { /* Y */
 		reg = <1>;
 		zephyr,gain = "ADC_GAIN_1";
 		zephyr,reference = "ADC_REF_EXTERNAL0";
 		zephyr,vref-mv = <3300>;
 		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS,2)>;
 		zephyr,resolution = <12>;
-		zephyr,oversampling = <4>;
+		zephyr,oversampling = <7>;
 		zephyr,input-positive = <MCUX_LPADC_CH0B>;
 		/delete-property/ zephyr,differential;
 	};
@@ -303,14 +301,14 @@
 	#size-cells = <0>;
 	status = "okay";
 
-	lpadc1_0: channel@0 {
+	lpadc1_0: channel@0 { /* X */
 		reg = <0>;
 		zephyr,gain = "ADC_GAIN_1";
 		zephyr,reference = "ADC_REF_EXTERNAL0";
 		zephyr,vref-mv = <3300>;
 		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS,2)>;
 		zephyr,resolution = <12>;
-		zephyr,oversampling = <5>;
+		zephyr,oversampling = <7>;
 		zephyr,input-positive = <MCUX_LPADC_CH0A>;
 		/delete-property/ zephyr,differential;
 	};

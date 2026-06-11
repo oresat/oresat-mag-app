@@ -26,7 +26,7 @@ menu "Oresat MCXN947 Mag Card"
 
    	config SEQUENCE_OVERSAMPLING
    		int "Number of conversion results to average for each sample."
-   		default 4
+   		default 7
 
 		config SEQUENCE_RESOLUTION
 			int "Set the resolution of the sequence readings."

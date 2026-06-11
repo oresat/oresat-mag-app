@@ -561,9 +561,9 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 	init_magnetorquer();
 #endif
 
-	err = set_pwm(0, 10);  // --> ADC2
-	err = set_pwm(1, 3000); // --> ADC0 and 1? CHA1
-	err = set_pwm(2, 10);  // --> ADC0
+	err = set_pwm(0, 1000);  // --> ADC
+	err = set_pwm(1, 1000);  // --> ADC1
+	err = set_pwm(2, 1000);  // --> ADC2
 
 	while (true) {
 		uint32_t adc_val;

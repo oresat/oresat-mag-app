@@ -22,6 +22,8 @@ LOG_MODULE_REGISTER(oresat_adc, LOG_LEVEL_DBG);
 /* 1000 msec = 1 sec */
 #define ADC_SLEEP_TIME_MS 100 /* Use 5 to generate more data to graph samples that follow the DAC output */
 
+#define MAX_ADC_READ_TRIES 10
+
 /* ADC node from the devicetree. */
 #define ADC_NODE0 DT_ALIAS(adc0)
 #define ADC_NODE1 DT_ALIAS(adc1)
@@ -104,7 +106,7 @@ static adc_info adc_info_map[CHANNEL_COUNT];
 /* Options for the sequence sampling. */
 static const struct adc_sequence_options options = {
 	.extra_samplings = CONFIG_SEQUENCE_SAMPLES - 1,
-	.interval_us = 10,
+	.interval_us = 0,
 };
 
 static void init_adc_info(void)
@@ -224,13 +226,20 @@ int acquire_adc_readings(void)
 {
 	int err;
 	int i;
+	int count = 0;
 	adc_dev_info *padi = adc_dev_infos;
 
 	for (i = 0; i < ADC_DEV_COUNT; i++) {
 		LOG_DBG("Requesting read from adc%d", i);
-		err = adc_read(padi->dev, &padi->sequence);
-		if (err < 0) {
-			LOG_ERR("Could not read (%d)", err);
+		do {
+			err = adc_read(padi->dev, &padi->sequence);
+			if (err < 0) {
+				k_sleep(K_MSEC(100));
+				//LOG_ERR("Could not read (%d)", err);
+			}
+		} while (err && (count++ < MAX_ADC_READ_TRIES));
+		if (err) {
+			LOG_ERR("Failed to read after %d tries; error %d", count, err);
 		}
 		padi++;
 	}
