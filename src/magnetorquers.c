@@ -19,7 +19,7 @@
 #include "imu.h"
 #include "magnetometer.h"
 
-LOG_MODULE_REGISTER(magnetorquers, CONFIG_LOG_DEFAULT_LEVEL);
+LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_INF);
 
 /* size of stack area used by each thread */
 #define STACK_SIZE 4096
@@ -28,9 +28,13 @@ LOG_MODULE_REGISTER(magnetorquers, CONFIG_LOG_DEFAULT_LEVEL);
 #define PRIORITY 7
 
 #define ITERATION_PERIOD 5 // ms
+#define DEBUG_PRINT_PERIOD 1500 // ms
+#define PWM_UPDATE_CHECK_PERIOD 10 // ms
 #define MT_ILIM_DAC_VALUE 177U // DAC value to set current limit for magnetorquers
 
 extern const k_tid_t magtqr_id;
+
+static uint32_t iterations;
 
 typedef struct {
 	int32_t current_pwm_percent; //0-10000
@@ -268,13 +272,14 @@ static void handle_can_open_data(void)
     CO_UNLOCK_OD();
 }
 
-void print_debug_output(void) {
+static void print_debug_output(void) {
 	static int64_t last_print_time = 0;
 	int64_t now = k_uptime_get();
 
-	if ((now - last_print_time) > 1500) { //750) {
+	if ((now - last_print_time) > DEBUG_PRINT_PERIOD) {
 		last_print_time = now;
 
+		LOG_INF("Magnetorquer iterations: %u", iterations);
 		LOG_DBG( "================");
 		LOG_DBG( "CANOpen Data:");
 		LOG_DBG( "  CO_OD_RAM.versions.fw_version = %.5s", CO_OD_RAM.versions.fw_version);
@@ -370,7 +375,7 @@ static int set_pwm_output(void) {
 
 		//Updates will come in periodically via CANOpen, this will apply those updates to the PWM outputs.
 		if ((g_adcs_data.mt_pwm_data[i].last_update_time == 0) ||
-			((t_now - g_adcs_data.mt_pwm_data[i].last_update_time) > 10)) {
+			((t_now - g_adcs_data.mt_pwm_data[i].last_update_time) > PWM_UPDATE_CHECK_PERIOD)) {
 
 			if( g_adcs_data.mt_pwm_data[i].current_pwm_percent != g_adcs_data.mt_pwm_data[i].target_pwm_percent ) {
 				LOG_DBG("target_pwm_percent = %d", g_adcs_data.mt_pwm_data[i].target_pwm_percent);
@@ -616,7 +621,6 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 	int64_t t_last = t_start;
 	int64_t t_now = t_start;
 	uint32_t adc_val;
-	uint32_t iterations = 0;
 	int32_t sign;
 	float measured_i_sense_voltage;
 	float microamps;

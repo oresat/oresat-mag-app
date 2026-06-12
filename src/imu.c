@@ -53,9 +53,14 @@ LOG_MODULE_REGISTER(imu, LOG_LEVEL_INF);
 #define SOFT_RESET_RETRIES 10
 #define SOFT_RESET_READY_TRIES 100
 #define DATA_READY_TRIES 500
-#define HIST_SIZE 10
 #define MAX_I2C_RECOVERY_RETRIES 10
 #define MAX_RECOVERY_BOOTS 10
+
+#define IMU_ITERATION_PERIOD 1 // ms
+#define DEBUG_PRINT_PERIOD 1500 // ms
+
+// make so that IMU_ITERATION_PERIOD * this is equal or longer than magnetorquer update period
+#define NUM_DATA_SAMPLE_PER_AVG 10
 
 static const struct device *i2c;
 static uint8_t imu_addr;
@@ -487,7 +492,7 @@ static int read_temp_data(int16_t *temp)
 }
 
 typedef struct {
-	int16_t hist[HIST_SIZE + 1];
+	int16_t hist[NUM_DATA_SAMPLE_PER_AVG + 1];
 	int depth;
 } hist_store;
 
@@ -501,15 +506,15 @@ static void process_datum(hist_store *hist_sp, int16_t new_datum, int16_t *ave_d
 	int i;
 
 	// throw out oldest sample
-	for (i = MIN(HIST_SIZE - 1, hist_sp->depth - 1); i > 0; i--) {
+	for (i = MIN(NUM_DATA_SAMPLE_PER_AVG - 1, hist_sp->depth - 1); i > 0; i--) {
 		hist_sp->hist[i + 1] = hist_sp->hist[i];
 	}
 
 	hist_sp->hist[0] = new_datum;
 
 	hist_sp->depth++;
-	if (hist_sp->depth > HIST_SIZE) {
-		hist_sp->depth = HIST_SIZE;
+	if (hist_sp->depth > NUM_DATA_SAMPLE_PER_AVG) {
+		hist_sp->depth = NUM_DATA_SAMPLE_PER_AVG;
 	}
 
 	int32_t sum = 0;
@@ -607,13 +612,13 @@ static void handle_imu(void *p1, void *p2, void *p3)
 
 		if (!err) {
 			count++;
-			if (count >= HIST_SIZE * 10) {
+			if (count >= (DEBUG_PRINT_PERIOD / IMU_ITERATION_PERIOD) ){
 				count = 0;
 				LOG_DBG("Ave gyro: (%d, %d, %d)", gx, gy, gz);
 				LOG_DBG("Ave temp (dC): %d", temp_decicentigrade);
 			}
 		}
-		k_sleep(K_MSEC(1));
+		k_sleep(K_MSEC(IMU_ITERATION_PERIOD));
 	}
 }
 

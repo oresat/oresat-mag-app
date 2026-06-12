@@ -10,15 +10,18 @@ physically attached to the mag card.
 # Building and flashing
 Ensure you are in the `mag` directory (`cd src/oresat/firmware/apps/mag`) prior to building.
 
-NOTE:
-  The `mcxn947_mag_card` is the default. It normally does not need to be specified as shown below,
-  except for the important exception of enabling MCUboot. In that case, it is mandatory for Zephyr 4.2.0.
+> NOTE:
+>   The `mcxn947_mag_card` is the default. It normally does not need to be specified as shown below,
+>   except for the important exception of enabling MCUboot. In that case, it is mandatory for Zephyr 4.2.0.
 
 | Board         | Build Example                                         |
 | ------------- | ----------------------------------------------------- |
 | mcxn947_mag_card | `west build -p always -b mcxn947_mag_card/mcxn947/cpu0` |
 | mcxn947_mag_card with shell | `west build -p always -b mcxn947_mag_card/mcxn947/cpu0 -- -DEXTRA_CONF_FILE=overlay_shell.conf` |
 | mcxn947_mag_card with MCUboot | `west build -p always -b mcxn947_mag_card/mcxn947/cpu0 --sysbuild -- -DBOARD_ROOT=$PWD` |
+
+> NOTE: the section below only gives general instructions. Specific steps below (like for setting the CAN node id) are self-contained
+>   in the section.
 
 # Building and flashing without the bootloader
 This runs the build and the flash faster when working in the lab.
@@ -33,8 +36,8 @@ $ west build -p
 $ west flash --erase -r pyocd
 ```
 
-NOTE: the `--erase` option will lose the settings data that stores a
-non-default CAN node id.
+> NOTE: the `--erase` option will lose the settings data that stores a
+>   non-default CAN node id.
 
 ## Subsequent builds:
 ```
@@ -71,8 +74,8 @@ Change the node id by entering `nodeid <N>` where N is the desired node id in de
 ## Rebuilding to remove shell
 Build again, using whatever options you need as explained in the document.
 
-NOTE: do not use the `--erase` parameter with `west flash` or you will lose the change you
-just made with the shell.
+> NOTE: do not use the `--erase` parameter with `west flash` or you will lose the change you
+> just made with the shell.
 
 # Building and flashing with bootloader
 ```
@@ -82,7 +85,7 @@ $ west flash --erase -r pyocd
 This will build two binaries: one for the bootloader, and one for the application.
 The flashing step will be done automatically in two parts to flash these two binaries.
 
-NOTE: The app flashing step will run slowly: this is normal.
+> NOTE: The app flashing step will run slowly: this is normal.
 
 ## CAN flashing script
 The `flash_canopen.py` script can be used to test flashing over CAN on the desktop.
@@ -118,5 +121,6 @@ the default CAN id of 124.
 ```
 $ python3 flash_canopen.py --serial-port /dev/ttyACM1 --bin  build/mag/zephyr/zephyr.signed.bin --node-id 124
 ```
-NOTE: The CAN id must be changed to the proper one for this card before the
-C3 can access it.
+
+> NOTE: The CAN id must be changed to the proper one for this card before the
+>  C3 can access it.
