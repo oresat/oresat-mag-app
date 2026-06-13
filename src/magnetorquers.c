@@ -27,6 +27,7 @@ LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_INF);
 /* scheduling priority used by each thread */
 #define PRIORITY 7
 
+#define MAGNETORQUER_STARTUP_DELAY 2000 // roughly when all the helper threads are up; TODO: add interthread signalling for this
 #define ITERATION_PERIOD 5 // ms
 #define DEBUG_PRINT_PERIOD 1500 // ms
 #define PWM_UPDATE_CHECK_PERIOD 10 // ms
@@ -602,6 +603,7 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 	int err;
 
 	k_thread_name_set(magtqr_id, "magtqr_thread");
+	k_sleep(K_MSEC(MAGNETORQUER_STARTUP_DELAY));
 
 	LOG_INF("Starting MAGNETORQUER thread");
 
@@ -626,6 +628,7 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 	float microamps;
 	int i;
 
+	LOG_INF("Starting magnetorquer loop");
     for (;;) {
         //LOG_DBG("IMU loop iteration %u system time %llu", iterations, t_last);
 		iterations++;

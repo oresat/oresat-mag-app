@@ -51,11 +51,12 @@ LOG_MODULE_REGISTER(imu, LOG_LEVEL_INF);
 #define IMU_DEVICE_ADDR_ALT 0x69 // I2C 7 bit address
 
 #define SOFT_RESET_RETRIES 10
-#define SOFT_RESET_READY_TRIES 100
+#define SOFT_RESET_READY_TRIES 10
 #define DATA_READY_TRIES 500
 #define MAX_I2C_RECOVERY_RETRIES 10
 #define MAX_RECOVERY_BOOTS 10
 
+#define IMU_STARTUP_DELAY 500
 #define IMU_ITERATION_PERIOD 1 // ms
 #define DEBUG_PRINT_PERIOD 1500 // ms
 
@@ -66,7 +67,6 @@ static const struct device *i2c;
 static uint8_t imu_addr;
 static uint8_t prev_bank;
 static bool imu_is_ready;
-static int rec_count;
 
 #define IMU_THREAD_STACK_SIZE 2048
 #define IMU_THREAD_PRIORITY 0
@@ -184,6 +184,7 @@ static int reset_imu(void)
 	int ret;
 	int attempt;
 	uint8_t int_status;
+	int rec_count;
 
 	rec_count = load_recovery_count();
 
@@ -206,12 +207,16 @@ static int reset_imu(void)
 					break;
 				}
 			}
-			k_msleep(10);
+			k_msleep(100);
 		}
-		if (!ret && (int_status & BIT_RESET_DONE_INT)) {
-			break;
+		if (!ret) {
+			if ((int_status & BIT_RESET_DONE_INT)) {
+				LOG_INF("I2C bus recovery successful.");
+				break;
+			}
 			// TODO: test this, then add sync to data ready int
 		}
+		LOG_INF("Recovering i2c bus");
 		ret = i2c_recover_bus(DEVICE_DT_GET(DT_NODELABEL(flexcomm0_lpi2c0)));
 		if (ret) {
 			LOG_WRN("I2C bus is stuck (err: %d); recovery failed", ret);
@@ -228,9 +233,12 @@ static int reset_imu(void)
 		} else {
 			LOG_ERR("Cannot recover i2c bus after 10 reboot attempts. Giving up.");
 		}
-	} else if (rec_count) {
-		LOG_INF("Resetting recovery count. Recovery successful");
-		store_recovery_count(0); // reset since we're good
+	} else {
+		if (rec_count) {
+			LOG_INF("Resetting recovery count. Recovery successful");
+			store_recovery_count(0); // reset since we're good
+		}
+		LOG_INF("IMU has been reset.");
 	}
 
 	return ret;
@@ -561,8 +569,10 @@ void get_gyro_data(int16_t *x, int16_t *y, int16_t *z, int16_t *temp)
 static void handle_imu(void *p1, void *p2, void *p3)
 {
 	int err;
+	int rec_count;
 
 	k_thread_name_set(imu_id, "imu_thread");
+	k_sleep(K_MSEC(IMU_STARTUP_DELAY));
 
 	LOG_INF("Starting IMU thread");
 
@@ -592,6 +602,7 @@ static void handle_imu(void *p1, void *p2, void *p3)
 	uint8_t int_status;
 	int16_t temp;
 
+	LOG_INF("Starting imu loop");
 	for (;;) {
 		for (i = 0; i < DATA_READY_TRIES; i++) {
 			err = imu_read_reg(REG_INT_STATUS, &int_status);

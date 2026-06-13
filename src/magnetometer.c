@@ -40,6 +40,7 @@ LOG_MODULE_REGISTER(magnetometer, LOG_LEVEL_INF);
 // - DEV 0402 -
 #define READINGS_BUFFER_SIZE 256
 
+#define MAG_STARTUP_DELAY 750
 #define RM3100_DEMO_SLEEP_TIME_MS 1000
 
 /* === GPIO data === */
@@ -244,6 +245,7 @@ static void handle_mag(void *p1, void *p2, void *p3)
 	int32_t rc = 0;
 
 	k_thread_name_set(mag_id, "mag_thread");
+	k_sleep(K_MSEC(MAG_STARTUP_DELAY));
 
 	LOG_INF("Starting MAG thread");
 
@@ -256,6 +258,7 @@ static void handle_mag(void *p1, void *p2, void *p3)
 #if (NUM_MAGS > 1)
 	uint8_t buf_b[READINGS_BUFFER_SIZE] = {0};
 #endif
+	LOG_INF("Starting mag loop");
 
 	while (true) {
 		if (!gpio_pin_get_dt(&n_mag_fault)) {

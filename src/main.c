@@ -21,7 +21,7 @@ LOG_MODULE_REGISTER(oresat_mcxn947_mag, LOG_LEVEL_DBG);
 
 int main(void)
 {
-	LOG_INF("\nOresat MCXN947 Mag Board App");
+	LOG_INF("Oresat MCXN947 Mag Board App");
 	LOG_INF("   Oresat   Board: %s", CONFIG_BOARD_TARGET);
 	LOG_INF("   App    Version: %s", APP_VERSION_STRING);
 	LOG_INF("   Zephyr Version: %s", KERNEL_VERSION_STRING);
