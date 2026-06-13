@@ -45,7 +45,7 @@
 #include "../drivers/sensor/tdk/icm4268x/icm4268x_reg.h"
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(imu, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(imu, CONFIG_SENSOR_LOG_LEVEL);
 
 #define IMU_DEVICE_ADDR 0x68 // I2C 7 bit address
 #define IMU_DEVICE_ADDR_ALT 0x69 // I2C 7 bit address

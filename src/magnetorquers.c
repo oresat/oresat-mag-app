@@ -19,7 +19,7 @@
 #include "imu.h"
 #include "magnetometer.h"
 
-LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(magnetorquers, CONFIG_LOG_DEFAULT_LEVEL);
 
 /* size of stack area used by each thread */
 #define STACK_SIZE 4096

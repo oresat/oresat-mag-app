@@ -14,7 +14,7 @@
 #include <zephyr/drivers/pwm.h>
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(oresat_pwm, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(oresat_pwm, CONFIG_PWM_LOG_LEVEL);
 
 /**
  * @brief   Converts from fraction to pulse width.

@@ -19,7 +19,7 @@
 #include <zephyr/drivers/adc.h>
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(oresat_dac, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(oresat_dac, CONFIG_DAC_LOG_LEVEL);
 
 #define ZEPHYR_USER_NODE DT_PATH(zephyr_user)
 
