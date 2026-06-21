@@ -35,7 +35,10 @@ LOG_MODULE_REGISTER(magcard_main, LOG_LEVEL_DBG);
 
 #define MAG0_NODE	DT_ALIAS(mag0)
 #define MAG1_NODE	DT_ALIAS(mag1)
-#if 0
+
+#define DEV_ENABLE_IMU1_NODE_USE
+
+#ifdef DEV_ENABLE_IMU1_NODE_USE
 #define IMU_NODE	DT_ALIAS(imu1)
 #endif
 
@@ -76,8 +79,6 @@ static const struct device *check_rm3100_sensor(const struct device *rm3100_dev)
 	return rm3100_dev;
 }
 
-// RTIO_DEFINE_WITH_MEMPOOL(ez_io, SQ_SZ, CQ_SZ, N, SAMPLE_SIZE, 4);
-
 SENSOR_DT_READ_IODEV(iodev, DT_COMPAT_GET_ANY_STATUS_OKAY(pni_rm3100),
 		{SENSOR_CHAN_MAGN_X, 0},
 		{SENSOR_CHAN_MAGN_Y, 0},
@@ -98,7 +99,7 @@ int main(void)
 {
 	const struct device *const rm3100a_dev = DEVICE_DT_GET(MAG0_NODE);
 	const struct device *const rm3100b_dev = DEVICE_DT_GET(MAG1_NODE);
-#if 0
+#ifdef DEV_ENABLE_IMU1_NODE_USE
 	const struct device *const imu_dev = DEVICE_DT_GET(IMU_NODE);
 #endif
 	// The following commented line from RTIO sample app which involves mempool,
@@ -127,7 +128,7 @@ int main(void)
 	}
 #endif
 
-#if 0
+#ifdef DEV_ENABLE_IMU1_NODE_USE
 	if (!device_is_ready(imu_dev)) {
 		LOG_ERR("Could not find icm42688 IMU, err %d", rc);
 	}
