@@ -265,11 +265,16 @@
 };
 
 &lpadc0 {
-	pinctrl-names = "default";
 	pinctrl-0 = <&pinmux_lpadc0_0>, <&pinmux_lpadc0_1>;
+	pinctrl-names = "default";
+
 	#address-cells = <1>;
 	#size-cells = <0>;
 	status = "okay";
+
+	voltage-ref = < 0x0 >;
+   power-level = < 0x01 >;
+
 	lpadc0_0: channel@0 { /* Z */
 		reg = <0>;
 		zephyr,gain = "ADC_GAIN_1";
@@ -302,6 +307,9 @@
 	#address-cells = <1>;
 	#size-cells = <0>;
 	status = "okay";
+
+	voltage-ref = < 0x0 >;
+   power-level = < 0x01 >;
 
 	lpadc1_0: channel@0 { /* X */
 		reg = <0>;
