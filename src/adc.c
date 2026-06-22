@@ -49,11 +49,11 @@ static const struct adc_channel_cfg channel_cfgs_dev_1[] = {
 #define CHANNEL_COUNT_DEV_1 ARRAY_SIZE(channel_cfgs_dev_1)
 #define CHANNEL_COUNT (CHANNEL_COUNT_DEV_0 + CHANNEL_COUNT_DEV_1)
 #define MAX_CHANNEL_DEV_COUNT MAX(CHANNEL_COUNT_DEV_0, CHANNEL_COUNT_DEV_1)
-static const struct adc_channel_cfg *adc_channel_cfgs[ADC_DEV_COUNT] = {
-	channel_cfgs_dev_0, channel_cfgs_dev_1
-};
 static int adc_channel_counts[ADC_DEV_COUNT] = {
 	CHANNEL_COUNT_DEV_0, CHANNEL_COUNT_DEV_1
+};
+static const struct adc_channel_cfg *adc_channel_cfgs[ADC_DEV_COUNT] = {
+	channel_cfgs_dev_0, channel_cfgs_dev_1
 };
 
 /* Data array of ADC channel voltage references. */
@@ -70,7 +70,7 @@ static uint32_t vrefs_mv_dev_1[] = {
 static int adc_vref_counts[ADC_DEV_COUNT] = {
 	ADC_VREF_DEV_0_COUNT, ADC_VREF_DEV_1_COUNT
 };
-static uint32_t *adc_vref_mvs[] = {
+static uint32_t *adc_vref_mvs[ADC_DEV_COUNT] = {
 	vrefs_mv_dev_0, vrefs_mv_dev_1
 };
 
@@ -164,8 +164,10 @@ static void init_adc_info(void)
 		log_to_phys[2] = 0;
 	}
 	for (i = 0; i < adc_index; i++) {
-		LOG_DBG("adc_info_map[%d]: padi:%p, logidx:%d, physidx:%d, dev:%d",
-				i, adc_info_map[i].adcdev, i, log_to_phys[i], adc_info_map[i].adc_dev_num);
+		int phys = log_to_phys[i];
+		LOG_DBG("adc_info_map[%d]: padi:%p, logidx:%d, physidx:%d, dev:%d(%s)",
+				i, adc_info_map[i].adcdev, i, phys,
+				adc_info_map[phys].adc_dev_num, adc_info_map[phys].adcdev->dev->name);
 	}
 }
 
@@ -258,10 +260,10 @@ int acquire_adc_readings(void)
 int read_adc(unsigned int log_adc_num, int32_t *val_mv)
 {
 	int err;
-	int32_t raw;
+	uint32_t raw;
+	uint32_t raw_sum = 0;
 	int num_samples = 0;
 	int32_t val_tmp;
-	int32_t val_sum = 0;
 	adc_info *info;
 	adc_dev_info *padi;
 	int phys_adc_num = log_to_phys[log_adc_num];
@@ -275,33 +277,25 @@ int read_adc(unsigned int log_adc_num, int32_t *val_mv)
 
 	*val_mv = 0;
 
-	LOG_DBG("Reading log_adc_num:%d, phys_num:%d, dev_num:%d (%s), ch_num:%d",
-			log_adc_num, phys_adc_num, info->adc_dev_num, padi->dev->name, info->ch_num);
-
 	for (size_t sample_index = 0U; sample_index < CONFIG_SEQUENCE_SAMPLES; sample_index++) {
-
-		raw = padi->channel_reading[sample_index][info->ch_num];
-		val_tmp = raw;
-
-		err = adc_raw_to_millivolts(padi->vrefs_mv[info->ch_num],
-									padi->config->gain,
-									CONFIG_SEQUENCE_RESOLUTION, &val_tmp);
-		if (err) {
-			LOG_ERR("Error converting raw adc to mV: %d", err);
-		} else {
-			num_samples++;
-			val_sum += val_tmp;
-		}
+		raw_sum += padi->channel_reading[sample_index][info->ch_num];
+		num_samples++;
 	}
-	if (num_samples) {
-		*val_mv = val_sum / num_samples;
-	} else {
+	raw = raw_sum / num_samples;
+
+	val_tmp = raw;
+	err = adc_raw_to_millivolts(padi->vrefs_mv[info->ch_num],
+								padi->config->gain,
+								CONFIG_SEQUENCE_RESOLUTION, &val_tmp);
+	if (err) {
+		LOG_ERR("Error converting raw adc to mV: %d", err);
 		return -ENODATA;
 	}
+	*val_mv = val_tmp;
 
-	/* conversion to mV may not be supported, skip if not */
-	if (!err) {
-		LOG_DBG("mV: %u", *val_mv);
-	}
+	LOG_DBG("log:%d, phys:%d, dev:%d(%s), ch:%d, mV: %u, raw: %u",
+			log_adc_num, phys_adc_num,
+			info->adc_dev_num, padi->dev->name, info->ch_num,
+			*val_mv, raw);
 	return 0;
 }
