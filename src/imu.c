@@ -57,11 +57,14 @@ LOG_MODULE_REGISTER(imu, CONFIG_SENSOR_LOG_LEVEL);
 #define MAX_RECOVERY_BOOTS 10
 
 #define IMU_STARTUP_DELAY 500
-#define IMU_ITERATION_PERIOD 1 // ms
-#define DEBUG_PRINT_PERIOD 1500 // ms
+#define IMU_ITERATION_PERIOD 90 // ms -- a bit more fast than the ODR -- will wait for interrupt (polled)
+#define IMU_ODR 100 // Hz
+#define DEBUG_PRINT_PERIOD  100 // 1s
 
-// make so that IMU_ITERATION_PERIOD * this is equal or longer than magnetorquer update period
+// make so that IMU_ODR * this is equal or longer than magnetorquer update period
 #define NUM_DATA_SAMPLE_PER_AVG 10
+
+//#define EXTRA_VERBOSE 1
 
 static const struct device *i2c;
 static uint8_t imu_addr;
@@ -450,7 +453,7 @@ static int read_gyro_data(int16_t *x, int16_t *y, int16_t *z)
 		LOG_ERR("Error reading X1: %d", ret);
 		return ret;
 	}
-	*x = b0 | ((uint16_t)b1 << 8);
+	*x = (uint16_t)b0 | (((uint16_t)b1) << 8);
 
 	ret = imu_read_reg(REG_GYRO_DATA_Y0, &b0);
 	if (ret < 0) {
@@ -462,7 +465,7 @@ static int read_gyro_data(int16_t *x, int16_t *y, int16_t *z)
 		LOG_ERR("Error reading Y1: %d", ret);
 		return ret;
 	}
-	*y = b0 | ((uint16_t)b1 << 8);
+	*y = (uint16_t)b0 | (((uint16_t)b1) << 8);
 
 	ret = imu_read_reg(REG_GYRO_DATA_Z0, &b0);
 	if (ret < 0) {
@@ -474,7 +477,7 @@ static int read_gyro_data(int16_t *x, int16_t *y, int16_t *z)
 		LOG_ERR("Error reading Z1: %d", ret);
 		return ret;
 	}
-	*z = b0 | ((uint16_t)b1 << 8);
+	*z = (uint16_t)b0 | (((uint16_t)b1) << 8);
 
 	return ret;
 }
@@ -495,30 +498,31 @@ static int read_temp_data(int16_t *temp)
 		LOG_ERR("Error reading TEMP1: %d", ret);
 		return ret;
 	}
-	*temp = b0 | ((uint16_t)b1 << 8);
+	*temp = (uint16_t)b0 | (((uint16_t)b1) << 8);
 	return ret;
 }
 
 typedef struct {
-	int16_t hist[NUM_DATA_SAMPLE_PER_AVG + 1];
-	int depth;
+	char name[2];
+	int32_t hist[NUM_DATA_SAMPLE_PER_AVG + 1];
+	int32_t depth;
 } hist_store;
 
-static hist_store x_hist;
-static hist_store y_hist;
-static hist_store z_hist;
-static hist_store temp_hist;
+static hist_store x_hist = {.name = "x"};
+static hist_store y_hist = {.name = "y"};
+static hist_store z_hist = {.name = "z"};
+static hist_store temp_hist = {.name = "t"};
 
 static void process_datum(hist_store *hist_sp, int16_t new_datum, int16_t *ave_data)
 {
-	int i;
+	int32_t i;
 
 	// throw out oldest sample
-	for (i = MIN(NUM_DATA_SAMPLE_PER_AVG - 1, hist_sp->depth - 1); i > 0; i--) {
+	for (i = NUM_DATA_SAMPLE_PER_AVG - 1; i >= 0; i--) {
 		hist_sp->hist[i + 1] = hist_sp->hist[i];
 	}
 
-	hist_sp->hist[0] = new_datum;
+	hist_sp->hist[0] = (int32_t)new_datum;
 
 	hist_sp->depth++;
 	if (hist_sp->depth > NUM_DATA_SAMPLE_PER_AVG) {
@@ -526,11 +530,23 @@ static void process_datum(hist_store *hist_sp, int16_t new_datum, int16_t *ave_d
 	}
 
 	int32_t sum = 0;
+#if defined(EXTRA_VERBOSE) && EXTRA_VERBOSE
+	static char line[1024];
+	size_t len = 0;
+#endif
 
 	for (i = 0; i < hist_sp->depth; i++) {
 		sum += hist_sp->hist[i];
+#if defined(EXTRA_VERBOSE) && EXTRA_VERBOSE
+		snprintk(&line[len], sizeof(line) - len, "%d, ", hist_sp->hist[i]);
+		len += strlen(&line[len]);
+#endif
 	}
-	*ave_data = (sum / hist_sp->depth);
+#if defined(EXTRA_VERBOSE) && EXTRA_VERBOSE
+	LOG_INF("%s, new:%d, sum:%d, depth:%d; %s", hist_sp->name, new_datum, sum, hist_sp->depth, line);
+#endif
+
+	*ave_data = (int16_t)(sum / hist_sp->depth);
 }
 
 static int process_data(int16_t *x, int16_t *y, int16_t *z, int16_t *temp)
@@ -623,7 +639,7 @@ static void handle_imu(void *p1, void *p2, void *p3)
 
 		if (!err) {
 			count++;
-			if (count >= (DEBUG_PRINT_PERIOD / IMU_ITERATION_PERIOD) ){
+			if (count >= (DEBUG_PRINT_PERIOD / IMU_ODR) ){
 				count = 0;
 				LOG_DBG("Ave gyro: (%d, %d, %d)", gx, gy, gz);
 				LOG_DBG("Ave temp (dC): %d", temp_decicentigrade);
