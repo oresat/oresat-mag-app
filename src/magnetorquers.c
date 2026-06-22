@@ -19,7 +19,7 @@
 #include "imu.h"
 #include "magnetometer.h"
 
-LOG_MODULE_REGISTER(magnetorquers, CONFIG_LOG_DEFAULT_LEVEL);
+LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_DBG);
 
 /* size of stack area used by each thread */
 #define STACK_SIZE 4096
@@ -32,6 +32,8 @@ LOG_MODULE_REGISTER(magnetorquers, CONFIG_LOG_DEFAULT_LEVEL);
 #define DEBUG_PRINT_PERIOD 1500 // ms
 #define PWM_UPDATE_CHECK_PERIOD 10 // ms
 #define MT_ILIM_DAC_VALUE 177U // DAC value to set current limit for magnetorquers
+#define ISENSE_GAIN 50.0f
+#define ISENSE_R_OHMS 0.030f
 
 extern const k_tid_t magtqr_id;
 
@@ -330,10 +332,10 @@ static void print_debug_output(void) {
 
 		for (int i = 0; i < 3; i++) {
 			mt_pwm_phase_data_t *data = &g_adcs_data.mt_pwm_data[i];
-			LOG_DBG( "  measured_i_sense_voltage[%d] = %d uA, %u mV",
+			LOG_DBG( "  i_sense[%d] = %d uA, %u mV",
 					i,
 					data->current_feedback_measurement_uA,
-					(uint32_t) (data->current_feedback_measurement_V * 1000));
+					(uint32_t) (data->current_feedback_measurement_V * 1000.0f));
 		}
 		//LOG_DBG( "  CO_EM_GENERIC_ERROR:  %u", CO_isError(CO->em, CO_EM_GENERIC_ERROR));
 	}
@@ -622,7 +624,7 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 	int64_t t_start = k_uptime_get(); //in milliseconds
 	int64_t t_last = t_start;
 	int64_t t_now = t_start;
-	uint32_t adc_val;
+	uint32_t adc_mv;
 	int32_t sign;
 	float measured_i_sense_voltage;
 	float microamps;
@@ -655,14 +657,14 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 
 		// now read the values acquired
 		for (i = 0; i < get_num_adc_channels(); i++) {
-			err = read_adc(i, &adc_val);
+			err = read_adc(i, &adc_mv);
 			if (err) {
 				continue;
 			}
-			measured_i_sense_voltage = (((float) adc_val) / 4096.0f) * 3.3f;
+			measured_i_sense_voltage = ((float)adc_mv) / (1000.0f * ISENSE_GAIN);
 			// Based on the circuit design, this should nominally be 3V/amp.
 			// This calculation seems to be within 5%-10% accurate when compared to in line bench DMM readings.
-			microamps = (measured_i_sense_voltage / 3.0f) * 1000000.0f;
+			microamps = (measured_i_sense_voltage / ISENSE_R_OHMS) * 1000000.0f;
 
 			g_adcs_data.mt_pwm_data[i].current_feedback_measurement_V = measured_i_sense_voltage;
 
