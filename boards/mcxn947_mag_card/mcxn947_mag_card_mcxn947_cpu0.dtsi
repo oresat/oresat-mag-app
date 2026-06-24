@@ -69,9 +69,9 @@
 		mt-en-gpios = <&gpio4 16 0>;		/* open drain out */
 		n-mt-en-fault-gpios = <&gpio4 13 0>;/* in */
 		n-mt-stby-rst-gpios = <&gpio4 12 0>;/* out */
-		mt-z-phase-gpios = <&gpio4 7 0>;	/* out */
-		mt-y-phase-gpios = <&gpio4 6 0>;	/* out */
-		mt-x-phase-gpios = <&gpio4 5 0>;	/* out */
+		mt-z-phase-gpios = <&gpio4 7 GPIO_ACTIVE_LOW>;	/* out */
+		mt-y-phase-gpios = <&gpio4 6 GPIO_ACTIVE_LOW>;	/* out */
+		mt-x-phase-gpios = <&gpio4 5 GPIO_ACTIVE_LOW>;	/* out */
 	};
 
 	zephyr,user {
