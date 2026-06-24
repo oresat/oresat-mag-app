@@ -31,9 +31,19 @@ LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_DBG);
 #define ITERATION_PERIOD 5 // ms
 #define DEBUG_PRINT_PERIOD 1500 // ms
 #define PWM_UPDATE_CHECK_PERIOD 10 // ms
-#define MT_ILIM_DAC_VALUE 177U // DAC value to set current limit for magnetorquers
-#define ISENSE_GAIN 50.0f
-#define ISENSE_R_OHMS 0.030f
+#define ISENSE_GAIN 50.0f // gain of the INA185 op amp
+#define ISENSE_R_OHMS 0.030f // resistance between the op amp + and - inputs
+
+#define DAC_RANGE 4096 // TODO: use real value from device tree
+#define DAC_VREF 3.3f
+#define R1_OHMS 237    // R58 should have been 23.7K
+#define R2_OHMS 1000   // R59
+#define R_SENSE_TOTAL (2 * ISENSE_R_OHMS) // shown in schematic, a second ISENSE_R_OHMS is in series from the op amp - input to ground
+#define MAGNETORQUER_CURRENT_LIMIT_A 2.0f // specified in schematic
+
+#define VREF (MAGNETORQUER_CURRENT_LIMIT_A * R_SENSE_TOTAL)           // into STSPIN250; with a total of 0.060 ohm sense resistance = ISENSE_R_OHMS * 2, this limits output current to 2A
+#define VOUT ((VREF * (R1_OHMS + R2_OHMS)) / R2_OHMS)                 // calculate needed input V to voltage divider to get out desired Vref
+#define MT_ILIM_DAC_VALUE ((uint32_t)((VOUT * DAC_RANGE) / DAC_VREF)) // convert that to a raw DAC value
 
 extern const k_tid_t magtqr_id;
 
@@ -90,6 +100,9 @@ static const struct gpio_dt_spec mt_x_phase = GPIO_DT_SPEC_GET(BP_NODE, mt_x_pha
 static const struct gpio_dt_spec mt_y_phase = GPIO_DT_SPEC_GET(BP_NODE, mt_y_phase_gpios);
 static const struct gpio_dt_spec mt_z_phase = GPIO_DT_SPEC_GET(BP_NODE, mt_z_phase_gpios);
 
+static int32_t map_current_uA_to_pwm_duty_cycle(const int32_t current_uA, const uint8_t axis);
+static int16_t raw_to_milligauss(int16_t raw);
+
 /**************************************************/
 
 static int init_gpios(void)
@@ -114,6 +127,7 @@ static int init_gpios(void)
 	if (ret) {
 		return ret;
 	}
+	// NOTE: the device tree should set the x/y/z_phase lines as active low, to fix logical-sense of the remainder of this code.
 	ret = gpio_pin_configure_dt(&mt_x_phase, GPIO_OUTPUT_INACTIVE);
 	if (ret) {
 		return ret;
@@ -131,48 +145,6 @@ static int init_gpios(void)
 }
 
 /**************************************************/
-
-static int32_t saturate_int32_t(const int32_t v, const int32_t min, const int32_t max) {
-	if (v >= max)
-		return (max);
-
-	else if (v <= min)
-		return (min);
-
-	return (v);
-}
-
-
-/**
- * return value is in the range of 0 to 10000
- */
-static int32_t map_current_uA_to_pwm_duty_cycle(const int32_t current_uA, const uint8_t axis) {
-	int32_t ret = 0;
-
-	if (axis <= 1) {
-		//X and Y axes
-		//1700 => 1000000 uA
-		//500 => 295000 uA (this is hard/impossible to measure using the ADC
-		ret = current_uA / (988000.0 / 1700.0);
-		const int32_t pwm_duty_max_value = 1700;
-		ret = saturate_int32_t(ret, -pwm_duty_max_value, pwm_duty_max_value);
-	} else {
-		//Z axis
-		//1700 => 344000 uA
-		//500 => 102000 uA  (this is hard/impossible to measure using the ADC
-		ret = current_uA / (344000.0 / 1700.0);
-		const int32_t pwm_duty_max_value = 4940;
-		ret = saturate_int32_t(ret, -pwm_duty_max_value, pwm_duty_max_value);
-	}
-
-	return(ret);
-}
-
-static int16_t raw_to_milligauss(int16_t raw)
-{
-		float gauss = 1000.0f * ((float) raw) / 4096.0f;
-		return (int16_t)gauss;
-}
 
 // to simulate the C3 ADCS code setting the setpoints for node id 0x10:
 //
@@ -341,6 +313,89 @@ static void print_debug_output(void) {
 	}
 }
 
+static int32_t saturate_int32_t(const int32_t v, const int32_t min, const int32_t max) {
+	if (v >= max)
+		return (max);
+
+	else if (v <= min)
+		return (min);
+
+	return (v);
+}
+
+/**
+ * return value is in the range of 0 to 10000
+ */
+static int32_t map_current_uA_to_pwm_duty_cycle(const int32_t current_uA, const uint8_t axis) {
+	int32_t ret = 0;
+
+	if (axis <= 1) {
+		//X and Y axes
+		//1700 => 1000000 uA
+		//500 => 295000 uA (this is hard/impossible to measure using the ADC
+		ret = current_uA / (988000.0 / 1700.0);
+		const int32_t pwm_duty_max_value = 1700;
+		ret = saturate_int32_t(ret, -pwm_duty_max_value, pwm_duty_max_value);
+	} else {
+		//Z axis
+		//1700 => 344000 uA
+		//500 => 102000 uA  (this is hard/impossible to measure using the ADC
+		ret = current_uA / (344000.0 / 1700.0);
+		const int32_t pwm_duty_max_value = 4940;
+		ret = saturate_int32_t(ret, -pwm_duty_max_value, pwm_duty_max_value);
+	}
+
+	return(ret);
+}
+
+static int16_t raw_to_milligauss(int16_t raw)
+{
+		float gauss = 1000.0f * ((float) raw) / 4096.0f;
+		return (int16_t)gauss;
+}
+
+/**
+ * @brief get_current_readings()
+ * Read current through magnetorquers.
+ *
+ * @param axes   - pointer to array of the number of ADC
+ *  			 channels, which should also be the number of
+ *  			 axes; TODO: add assert if not true
+ * @return int - non-zero value on error, 0 if none
+ */
+static int get_current_readings(mt_pwm_phase_data_t *axes)
+{
+	int err;
+	int i;
+	uint32_t adc_mv;
+	int32_t sign;
+	float measured_i_sense_voltage;
+	float microamps;
+
+	// tell ADC to read all channels at once
+	err = acquire_adc_readings();
+	if (err) {
+		return 0;
+	}
+
+	// now read the values acquired
+	for (i = 0; i < get_num_adc_channels(); i++) {
+		err = read_adc(i, &adc_mv);
+		if (err) {
+			continue;
+		}
+		measured_i_sense_voltage = ((float)adc_mv) / (1000.0f * ISENSE_GAIN);
+		// Based on the circuit design, this should nominally be 3V/amp.
+		// This calculation seems to be within 5%-10% accurate when compared to in line bench DMM readings.
+		microamps = (measured_i_sense_voltage / ISENSE_R_OHMS) * 1000000.0f;
+		sign = (axes[i].current_pwm_percent < 0) ? -1 : 1;
+
+		axes[i].current_feedback_measurement_V = measured_i_sense_voltage;
+		axes[i].current_feedback_measurement_uA = (int32_t)(microamps * sign);
+	}
+	return err;
+}
+
 static int set_pwm_phase(int i, bool level)
 {
 	const struct gpio_dt_spec *spec;
@@ -361,6 +416,7 @@ static int set_pwm_phase(int i, bool level)
 		return -EINVAL;
 	}
 	LOG_DBG("set MT_%d_PHASE to %d", i, level);
+	// NOTE: the device tree should set the x/y/z_phase lines as active low, to fix logical-sense of the remainder of this code.
 	ret = gpio_pin_set_dt(spec, level);
 	if (ret) {
 		LOG_ERR("Unable to set phase pin level: %d", ret);
@@ -474,16 +530,9 @@ static int init_magnetorquer(void) {
 		LOG_ERR("Error initializing DAC: %d", err);
 		return err;
 	}
-	// ChibiOS version did this:
-	//    dacPutChannelX(&DACD1, 0, 3600); //3V
-	// It's DAC resolution also 12 bit; the max value is 4095.
-	// If it's max output voltage is 3.3V, then
-	// 3.3V * 3600 /4095 = 2.90V, not 3V.
-	// Leaving for now.
-	// TODO: find out if this is OK.
 
-	// R58 was stuffed wrong; need to change output to 0.0284 (value of 35)
-	LOG_DBG("Set MT_ILIM; DAC = %d", MT_ILIM_DAC_VALUE);
+	LOG_DBG("Set MT_ILIM; VREF_MV = %d, VOUT_MV = %d, DAC = %d",
+			(int)(VREF * 1000.0f), (int)(VOUT * 1000.0f), MT_ILIM_DAC_VALUE);
 	err = write_dac(MT_ILIM_DAC_VALUE);
 	if (err) {
 		LOG_ERR("Error writing DAC: %d", err);
@@ -624,10 +673,6 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 	int64_t t_start = k_uptime_get(); //in milliseconds
 	int64_t t_last = t_start;
 	int64_t t_now = t_start;
-	uint32_t adc_mv;
-	int32_t sign;
-	float measured_i_sense_voltage;
-	float microamps;
 	int i;
 
 	LOG_INF("Starting magnetorquer loop");
@@ -643,33 +688,21 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 					  &g_adcs_data.temp_data);
 
 		for (i = 0; i < NUM_MAGS; i++) {
-			err = get_mag_reading(i,
+			int ret = get_mag_reading(i,
 								  &g_adcs_data.magnetometer_data[i].x,
 								  &g_adcs_data.magnetometer_data[i].y,
 								  &g_adcs_data.magnetometer_data[i].z);
-		}
-
-		// tell ADC to read all channels at once
-		err = acquire_adc_readings();
-		if (err) {
-			return 0;
-		}
-
-		// now read the values acquired
-		for (i = 0; i < get_num_adc_channels(); i++) {
-			err = read_adc(i, &adc_mv);
-			if (err) {
-				continue;
+			if (ret) {
+				err = ret; // be sure to report any errors, even just 1
 			}
-			measured_i_sense_voltage = ((float)adc_mv) / (1000.0f * ISENSE_GAIN);
-			// Based on the circuit design, this should nominally be 3V/amp.
-			// This calculation seems to be within 5%-10% accurate when compared to in line bench DMM readings.
-			microamps = (measured_i_sense_voltage / ISENSE_R_OHMS) * 1000000.0f;
+		}
+		if (err) {
+			LOG_WRN("One or more magnetometers could not be read: %d", err);
+		}
 
-			g_adcs_data.mt_pwm_data[i].current_feedback_measurement_V = measured_i_sense_voltage;
-
-			sign = (g_adcs_data.mt_pwm_data[i].current_pwm_percent < 0) ? -1 : 1;
-			g_adcs_data.mt_pwm_data[i].current_feedback_measurement_uA = (int32_t)(microamps * sign);
+		err = get_current_readings(g_adcs_data.mt_pwm_data);
+		if (err) {
+			LOG_WRN("One or more ADC channels read in error: %d", err);
 		}
 
 		err = set_pwm_output();
