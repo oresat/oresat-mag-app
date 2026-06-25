@@ -27,34 +27,63 @@ LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_DBG);
 /* scheduling priority used by each thread */
 #define PRIORITY 7
 
-#define MAGNETORQUER_STARTUP_DELAY 2000 // roughly when all the helper threads are up; TODO: add interthread signalling for this
-#define ITERATION_PERIOD 5 // ms
-#define DEBUG_PRINT_PERIOD 1500 // ms
-#define PWM_UPDATE_CHECK_PERIOD 10 // ms
-#define ISENSE_GAIN 50.0f // gain of the INA185 op amp
-#define ISENSE_R_OHMS 0.030f // resistance between the op amp + and - inputs
+#define MAGNETORQUER_STARTUP_DELAY 2000			// roughly when all the helper threads are up; TODO: add interthread signalling for this
+#define ITERATION_PERIOD 5						// ms
+#define DEBUG_PRINT_PERIOD 1500					// ms
+#define PWM_UPDATE_CHECK_PERIOD 10				// ms
+#define ISENSE_GAIN 50.0f						// gain of the INA185 op amp
+#define ISENSE_R_OHMS 0.030f					// resistance between the op amp + and - inputs
 
-#define DAC_RANGE 4096 // TODO: use real value from device tree
+#define DAC_RANGE 4096							// TODO: use real value from device tree
 #define DAC_VREF 3.3f
-#define R1_OHMS 237    // R58 should have been 23.7K
-#define R2_OHMS 1000   // R59
-#define R_SENSE_TOTAL (2 * ISENSE_R_OHMS) // shown in schematic, a second ISENSE_R_OHMS is in series from the op amp - input to ground
-#define MAGNETORQUER_CURRENT_LIMIT_A 2.0f // specified in schematic
+#define R1_OHMS 237								// R58 should have been 23.7K
+#define R2_OHMS 1000							// R59
+#define R_SENSE_TOTAL (2 * ISENSE_R_OHMS)		// shown in schematic, a second ISENSE_R_OHMS is in series from the op amp - input to ground
+#define MAGNETORQUER_CURRENT_LIMIT_A 2.0f		// specified in schematic
 
-#define VREF (MAGNETORQUER_CURRENT_LIMIT_A * R_SENSE_TOTAL)           // into STSPIN250; with a total of 0.060 ohm sense resistance = ISENSE_R_OHMS * 2, this limits output current to 2A
-#define VOUT ((VREF * (R1_OHMS + R2_OHMS)) / R2_OHMS)                 // calculate needed input V to voltage divider to get out desired Vref
-#define MT_ILIM_DAC_VALUE ((uint32_t)((VOUT * DAC_RANGE) / DAC_VREF)) // convert that to a raw DAC value
+#define VREF (MAGNETORQUER_CURRENT_LIMIT_A * R_SENSE_TOTAL)				// input to STSPIN250; with a total of 0.060 ohm sense resistance = ISENSE_R_OHMS * 2, this limits output current to 2A
+#define VOUT ((VREF * (R1_OHMS + R2_OHMS)) / R2_OHMS)					// calculate needed input V to voltage divider to get out desired Vref
+#define MT_ILIM_DAC_VALUE ((uint32_t)((VOUT * DAC_RANGE) / DAC_VREF))	// convert that to a raw DAC value
+
+#define MAX_PWM_DUTY_CYCLE_X 10000
+#define MAX_PWM_DUTY_CYCLE_Y 10000
+#define MAX_PWM_DUTY_CYCLE_Z 10000
+
+#define MIN_OPERATING_VBUSP_MV 7400				// set Kff so that we get maximum possible current at 100% duty cycle for mid-point of battery voltage
+#define R_X_MT 153								// DC resistance of X axis magnetorquer
+#define R_Y_MT 153								// DC resistance of Y axis magnetorquer
+#define R_Z_MT 56								// DC resistance of Z axis magnetorquer
+
+static const int32_t Kff[] = {
+	10000 / (MIN_OPERATING_VBUSP_MV / R_X_MT),	// ~206
+	10000 / (MIN_OPERATING_VBUSP_MV / R_Y_MT),	// ~206
+	10000 / (MIN_OPERATING_VBUSP_MV / R_Z_MT)	// ~75
+};
+
+// starting point -- tune these in the lab
+static const int32_t Kp[] = {
+	Kff[0] / 2,
+	Kff[1] / 2,
+	Kff[2] / 2
+};
+
+static const int32_t max_pwm_duty_cycles[] = {
+	MAX_PWM_DUTY_CYCLE_X,
+	MAX_PWM_DUTY_CYCLE_Y,
+	MAX_PWM_DUTY_CYCLE_Z
+};
 
 extern const k_tid_t magtqr_id;
 
 static uint32_t iterations;
 
 typedef struct {
-	int32_t current_pwm_percent; //0-10000
-	int32_t target_pwm_percent; //Negative values indicate the phase should be inverted
+	int32_t target_current_uA;			// ADCS code on C3 requests this over CAN
+	int32_t goal_pwm_percent;			// Negative values indicate the phase should be inverted
 
-	float current_feedback_measurement_V; //Volts, Note: this is the average voltage while the PWM output is high.
-	int32_t current_feedback_measurement_uA; //uA. Note: this is the average current flowing while the PWM output is high. It does not represent overall average current.
+	int32_t active_pwm_percent;			// 0-10000
+	float feedback_measurement_V;		// Volts, Note: this is the average voltage while the PWM output is high.
+	int32_t feedback_measurement_uA;	// uA. Note: this is the average current flowing while the PWM output is high. It does not represent overall average current.
 
 	bool phase_state;
 	uint8_t phase_gpio_pin_number;
@@ -100,7 +129,7 @@ static const struct gpio_dt_spec mt_x_phase = GPIO_DT_SPEC_GET(BP_NODE, mt_x_pha
 static const struct gpio_dt_spec mt_y_phase = GPIO_DT_SPEC_GET(BP_NODE, mt_y_phase_gpios);
 static const struct gpio_dt_spec mt_z_phase = GPIO_DT_SPEC_GET(BP_NODE, mt_z_phase_gpios);
 
-static int32_t map_current_uA_to_pwm_duty_cycle(const int32_t current_uA, const uint8_t axis);
+static int32_t calc_pwm_from_uA_setpoint(const int32_t target_uA, int axis);
 static int16_t raw_to_milligauss(int16_t raw);
 
 /**************************************************/
@@ -173,13 +202,13 @@ static void handle_can_open_data(void)
 {
 	size_t ver_size = sizeof(CO_OD_RAM.versions.fw_version);
 
-    CO_LOCK_OD();
+	CO_LOCK_OD();
 
 	strncpy(CO_OD_RAM.versions.fw_version, &APP_VERSION_STRING[6], ver_size);
 
-	g_adcs_data.mt_pwm_data[0].target_pwm_percent = map_current_uA_to_pwm_duty_cycle(CO_OD_RAM.magnetorquer.current_x_setpoint * 100, 0);
-	g_adcs_data.mt_pwm_data[1].target_pwm_percent = map_current_uA_to_pwm_duty_cycle(CO_OD_RAM.magnetorquer.current_y_setpoint * 100, 1);
-	g_adcs_data.mt_pwm_data[2].target_pwm_percent = map_current_uA_to_pwm_duty_cycle(CO_OD_RAM.magnetorquer.current_z_setpoint * 100, 2);
+	g_adcs_data.mt_pwm_data[0].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_x_setpoint * 100, 0);
+	g_adcs_data.mt_pwm_data[1].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_y_setpoint * 100, 1);
+	g_adcs_data.mt_pwm_data[2].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_z_setpoint * 100, 2);
 
 	CO_OD_RAM.gyroscope.pitch_rate = g_adcs_data.gyro_data.x;
 	CO_OD_RAM.gyroscope.yaw_rate = g_adcs_data.gyro_data.y;
@@ -197,13 +226,13 @@ static void handle_can_open_data(void)
 
 	CO_OD_RAM.temperature = g_adcs_data.temp_data;
 
-	CO_OD_RAM.magnetorquer.current_x = g_adcs_data.mt_pwm_data[0].current_feedback_measurement_uA;
-	CO_OD_RAM.magnetorquer.current_y = g_adcs_data.mt_pwm_data[1].current_feedback_measurement_uA;
-	CO_OD_RAM.magnetorquer.current_z = g_adcs_data.mt_pwm_data[2].current_feedback_measurement_uA;
+	CO_OD_RAM.magnetorquer.current_x = g_adcs_data.mt_pwm_data[0].feedback_measurement_uA;
+	CO_OD_RAM.magnetorquer.current_y = g_adcs_data.mt_pwm_data[1].feedback_measurement_uA;
+	CO_OD_RAM.magnetorquer.current_z = g_adcs_data.mt_pwm_data[2].feedback_measurement_uA;
 
-	CO_OD_RAM.magnetorquer.pwm_x = g_adcs_data.mt_pwm_data[0].current_pwm_percent;
-	CO_OD_RAM.magnetorquer.pwm_y = g_adcs_data.mt_pwm_data[1].current_pwm_percent;
-	CO_OD_RAM.magnetorquer.pwm_z = g_adcs_data.mt_pwm_data[2].current_pwm_percent;
+	CO_OD_RAM.magnetorquer.pwm_x = g_adcs_data.mt_pwm_data[0].active_pwm_percent;
+	CO_OD_RAM.magnetorquer.pwm_y = g_adcs_data.mt_pwm_data[1].active_pwm_percent;
+	CO_OD_RAM.magnetorquer.pwm_z = g_adcs_data.mt_pwm_data[2].active_pwm_percent;
 
 	if (1) { //g_adcs_data.magetometer_data[EC_MAG_2_PZ_1].is_working) {
 		CO_OD_RAM.pos_z_magnetometer_1.x = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_2_PZ_1].x);
@@ -244,7 +273,7 @@ static void handle_can_open_data(void)
 		CO_OD_RAM.min_z_magnetometer_2.y = INT16_MAX;
 		CO_OD_RAM.min_z_magnetometer_2.z = INT16_MAX;
 	}
-    CO_UNLOCK_OD();
+	CO_UNLOCK_OD();
 }
 
 static void print_debug_output(void) {
@@ -306,8 +335,8 @@ static void print_debug_output(void) {
 			mt_pwm_phase_data_t *data = &g_adcs_data.mt_pwm_data[i];
 			LOG_DBG( "  i_sense[%d] = %d uA, %u mV",
 					i,
-					data->current_feedback_measurement_uA,
-					(uint32_t) (data->current_feedback_measurement_V * 1000.0f));
+					data->feedback_measurement_uA,
+					(uint32_t) (data->feedback_measurement_V * 1000.0f));
 		}
 		//LOG_DBG( "  CO_EM_GENERIC_ERROR:  %u", CO_isError(CO->em, CO_EM_GENERIC_ERROR));
 	}
@@ -326,26 +355,40 @@ static int32_t saturate_int32_t(const int32_t v, const int32_t min, const int32_
 /**
  * return value is in the range of 0 to 10000
  */
-static int32_t map_current_uA_to_pwm_duty_cycle(const int32_t current_uA, const uint8_t axis) {
-	int32_t ret = 0;
+static int32_t calc_pwm_from_uA_setpoint(const int32_t target_uA, int axis)
+{
+	int32_t pwm = 0;
+
+	const int32_t actual_uA = g_adcs_data.mt_pwm_data[axis].feedback_measurement_uA;
+	const int32_t max_pwm_duty_cycle = max_pwm_duty_cycles[axis];
+
+	int32_t feed_forward = target_uA * Kff[axis];
+	int32_t error = target_uA - actual_uA;
+
+	pwm = feed_forward + error * Kp[axis];
+	pwm = saturate_int32_t(pwm, -max_pwm_duty_cycle, max_pwm_duty_cycle);
+	return(pwm);
+
+#if 0
+	// ChibiOS stuff
 
 	if (axis <= 1) {
 		//X and Y axes
 		//1700 => 1000000 uA
 		//500 => 295000 uA (this is hard/impossible to measure using the ADC
-		ret = current_uA / (988000.0 / 1700.0);
+		pwm = current_uA / (988000.0 / 1700.0);
 		const int32_t pwm_duty_max_value = 1700;
-		ret = saturate_int32_t(ret, -pwm_duty_max_value, pwm_duty_max_value);
+		pwm = saturate_int32_t(pwm, -pwm_duty_max_value, pwm_duty_max_value);
 	} else {
 		//Z axis
 		//1700 => 344000 uA
 		//500 => 102000 uA  (this is hard/impossible to measure using the ADC
-		ret = current_uA / (344000.0 / 1700.0);
+		pwm = current_uA / (344000.0 / 1700.0);
 		const int32_t pwm_duty_max_value = 4940;
-		ret = saturate_int32_t(ret, -pwm_duty_max_value, pwm_duty_max_value);
+		pwm = saturate_int32_t(pwm, -pwm_duty_max_value, pwm_duty_max_value);
 	}
-
-	return(ret);
+	return(pwm);
+#endif
 }
 
 static int16_t raw_to_milligauss(int16_t raw)
@@ -384,14 +427,14 @@ static int get_current_readings(mt_pwm_phase_data_t *axes)
 		if (err) {
 			continue;
 		}
-		measured_i_sense_voltage = ((float)adc_mv) / (1000.0f * ISENSE_GAIN);
-		// Based on the circuit design, this should nominally be 3V/amp.
-		// This calculation seems to be within 5%-10% accurate when compared to in line bench DMM readings.
-		microamps = (measured_i_sense_voltage / ISENSE_R_OHMS) * 1000000.0f;
-		sign = (axes[i].current_pwm_percent < 0) ? -1 : 1;
 
-		axes[i].current_feedback_measurement_V = measured_i_sense_voltage;
-		axes[i].current_feedback_measurement_uA = (int32_t)(microamps * sign);
+		measured_i_sense_voltage = ((float)adc_mv) / (1000.0f * ISENSE_GAIN);
+
+		microamps = (measured_i_sense_voltage / ISENSE_R_OHMS) * 1000000.0f;
+		sign = (axes[i].active_pwm_percent < 0) ? -1 : 1;
+
+		axes[i].feedback_measurement_V = measured_i_sense_voltage;
+		axes[i].feedback_measurement_uA = (int32_t)(microamps * sign);
 	}
 	return err;
 }
@@ -436,15 +479,15 @@ static int set_pwm_output(void) {
 		if ((g_adcs_data.mt_pwm_data[i].last_update_time == 0) ||
 			((t_now - g_adcs_data.mt_pwm_data[i].last_update_time) > PWM_UPDATE_CHECK_PERIOD)) {
 
-			if( g_adcs_data.mt_pwm_data[i].current_pwm_percent != g_adcs_data.mt_pwm_data[i].target_pwm_percent ) {
-				LOG_DBG("target_pwm_percent = %d", g_adcs_data.mt_pwm_data[i].target_pwm_percent);
+			if( g_adcs_data.mt_pwm_data[i].active_pwm_percent != g_adcs_data.mt_pwm_data[i].goal_pwm_percent ) {
+				LOG_DBG("goal_pwm_percent = %d", g_adcs_data.mt_pwm_data[i].goal_pwm_percent);
 
 				// can't disable on MCXN? pwmDisableChannel(&PWMD1, g_adcs_data.mt_pwm_data[i].pwm_channel_number);
 
 				// TODO: warning -- there may be a delay due to other threads running between changing the phase
 				// below, and setting the new PWM. This could cause a glitch and an unintentional pulse in the wrong
 				// direction.
-				if (g_adcs_data.mt_pwm_data[i].target_pwm_percent < 0) {
+				if (g_adcs_data.mt_pwm_data[i].goal_pwm_percent < 0) {
 					new_state = true;
 				} else {
 					new_state = false;
@@ -458,13 +501,11 @@ static int set_pwm_output(void) {
 					g_adcs_data.mt_pwm_data[i].phase_state = new_state;
 				}
 
-				const int32_t pwm_val = abs(g_adcs_data.mt_pwm_data[i].target_pwm_percent);
+				const int32_t pwm_val = abs(g_adcs_data.mt_pwm_data[i].goal_pwm_percent);
 
 				set_pwm(i, pwm_val); // set_pwm does the scaling from percentage to width
 
-				//pwmEnableChannel(&PWMD1, g_adcs_data.mt_pwm_data[i].pwm_channel_number, PWM_PERCENTAGE_TO_WIDTH(&PWMD1, pwm_val));
-
-				g_adcs_data.mt_pwm_data[i].current_pwm_percent = g_adcs_data.mt_pwm_data[i].target_pwm_percent;
+				g_adcs_data.mt_pwm_data[i].active_pwm_percent = g_adcs_data.mt_pwm_data[i].goal_pwm_percent;
 				g_adcs_data.mt_pwm_data[i].last_update_time = t_now;
 			}
 		}
@@ -676,8 +717,8 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 	int i;
 
 	LOG_INF("Starting magnetorquer loop");
-    for (;;) {
-        //LOG_DBG("IMU loop iteration %u system time %llu", iterations, t_last);
+	for (;;) {
+		//LOG_DBG("IMU loop iteration %u system time %llu", iterations, t_last);
 		iterations++;
 
 		// x, y, and z are in units of: (for GYRO_FS_SEL = 7) 2097.2LSB/(º/s)
