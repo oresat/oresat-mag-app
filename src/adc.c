@@ -19,9 +19,6 @@
 
 LOG_MODULE_REGISTER(oresat_adc, CONFIG_ADC_LOG_LEVEL);
 
-/* 1000 msec = 1 sec */
-#define ADC_SLEEP_TIME_MS 50 /* Use 5 to generate more data to graph samples that follow the DAC output */
-
 #define MAX_ADC_READ_TRIES 10
 
 /* ADC node from the devicetree. */
