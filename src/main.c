@@ -130,7 +130,7 @@ int main(void)
 
 #ifdef DEV_ENABLE_IMU1_NODE_USE
 	if (!device_is_ready(imu_dev)) {
-		LOG_ERR("Could not find icm42688 IMU, err %d", rc);
+		LOG_ERR("Device icm42688 reported as not ready." );
 	}
 #endif
 
