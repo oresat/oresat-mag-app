@@ -9,7 +9,6 @@
         aliases {
                 mag0 = &rm3100a;
                 mag1 = &rm3100b;
-		/* imu1 = &icm42688_1; */
 		imu1 = &icm42688_1;
         };
 };
