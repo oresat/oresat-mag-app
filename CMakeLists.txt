@@ -9,7 +9,7 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(oresat_mcxn947_mag)
 
 set(VERSION_MAJOR "1")
-set(VERSION_MINOR "0")
+set(VERSION_MINOR "1")
 set(PATCHLEVEL "0")
 set(VERSION_TWEAK "0")
 set(EXTRAVERSION "00000000")
@@ -37,7 +37,7 @@ configure_file (
    )
 include_directories("${PROJECT_SOURCE_DIR}") # needed so c code can find this header
 
-target_sources(app PRIVATE src/main.c)
+target_sources(app PRIVATE src/main.c src/windowed_average.c)
 
 # Compile in various demos depending on Kconfig values.
 target_sources_ifdef(CONFIG_DAC_INTF     app PRIVATE src/dac.c)

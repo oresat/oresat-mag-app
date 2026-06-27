@@ -8,6 +8,7 @@
 #include <canopennode.h>
 #include <CO_OD.h>
 
+#include "windowed_average.h"
 #include "imu.h"
 
 /**
@@ -44,6 +45,8 @@
 
 #include "../drivers/sensor/tdk/icm4268x/icm4268x_reg.h"
 
+#include "windowed_average.h"
+
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(imu, CONFIG_SENSOR_LOG_LEVEL);
 
@@ -61,11 +64,6 @@ LOG_MODULE_REGISTER(imu, CONFIG_SENSOR_LOG_LEVEL);
 #define IMU_ODR 100 // Hz
 #define DEBUG_PRINT_PERIOD  100 // 1s
 
-// make so that IMU_ODR * this is equal or longer than magnetorquer update period
-#define NUM_DATA_SAMPLE_PER_AVG 10
-
-//#define EXTRA_VERBOSE 1
-
 static const struct device *i2c;
 static uint8_t imu_addr;
 static uint8_t prev_bank;
@@ -79,6 +77,11 @@ static int16_t gx = 0;
 static int16_t gy = 0;
 static int16_t gz = 0;
 static int16_t gtemp = 0;
+
+static wnd_avg_store x_hist = {.name = "x"};
+static wnd_avg_store y_hist = {.name = "y"};
+static wnd_avg_store z_hist = {.name = "z"};
+static wnd_avg_store temp_hist = {.name = "t"};
 
 static int check_i2c_device_presence(uint8_t addr)
 {
@@ -502,53 +505,6 @@ static int read_temp_data(int16_t *temp)
 	return ret;
 }
 
-typedef struct {
-	char name[2];
-	int32_t hist[NUM_DATA_SAMPLE_PER_AVG + 1];
-	int32_t depth;
-} hist_store;
-
-static hist_store x_hist = {.name = "x"};
-static hist_store y_hist = {.name = "y"};
-static hist_store z_hist = {.name = "z"};
-static hist_store temp_hist = {.name = "t"};
-
-static void process_datum(hist_store *hist_sp, int16_t new_datum, int16_t *ave_data)
-{
-	int32_t i;
-
-	// throw out oldest sample
-	for (i = NUM_DATA_SAMPLE_PER_AVG - 1; i >= 0; i--) {
-		hist_sp->hist[i + 1] = hist_sp->hist[i];
-	}
-
-	hist_sp->hist[0] = (int32_t)new_datum;
-
-	hist_sp->depth++;
-	if (hist_sp->depth > NUM_DATA_SAMPLE_PER_AVG) {
-		hist_sp->depth = NUM_DATA_SAMPLE_PER_AVG;
-	}
-
-	int32_t sum = 0;
-#if defined(EXTRA_VERBOSE) && EXTRA_VERBOSE
-	static char line[1024];
-	size_t len = 0;
-#endif
-
-	for (i = 0; i < hist_sp->depth; i++) {
-		sum += hist_sp->hist[i];
-#if defined(EXTRA_VERBOSE) && EXTRA_VERBOSE
-		snprintk(&line[len], sizeof(line) - len, "%d, ", hist_sp->hist[i]);
-		len += strlen(&line[len]);
-#endif
-	}
-#if defined(EXTRA_VERBOSE) && EXTRA_VERBOSE
-	LOG_INF("%s, new:%d, sum:%d, depth:%d; %s", hist_sp->name, new_datum, sum, hist_sp->depth, line);
-#endif
-
-	*ave_data = (int16_t)(sum / hist_sp->depth);
-}
-
 static int process_data(int16_t *x, int16_t *y, int16_t *z, int16_t *temp)
 {
 	int err;
@@ -561,15 +517,17 @@ static int process_data(int16_t *x, int16_t *y, int16_t *z, int16_t *temp)
 	if (err < 0) {
 		return err;
 	}
-	process_datum(&x_hist, new_x, x);
-	process_datum(&y_hist, new_y, y);
-	process_datum(&z_hist, new_z, z);
+
+	*x = (int16_t)update_windowed_average(&x_hist, new_x);
+	*y = (int16_t)update_windowed_average(&y_hist, new_y);
+	*z = (int16_t)update_windowed_average(&z_hist, new_z);
 
 	err = read_temp_data(&new_temp);
 	if (err < 0) {
 		return err;
 	}
-	process_datum(&temp_hist, new_temp, temp);
+
+	*temp = (int16_t)update_windowed_average(&temp_hist, new_temp);
 
 	return 0;
 }
