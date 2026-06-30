@@ -8,6 +8,7 @@
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/rtio/rtio.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/shell/shell.h>
 #if defined(CONFIG_CAN)
 #include <canopennode.h>
 #endif
@@ -33,7 +34,7 @@ LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_DBG);
 #define MAGNETORQUER_STARTUP_DELAY 2000			// roughly when all the helper threads are up; TODO: add interthread signalling for this
 #define ITERATION_PERIOD 5						// ms
 #define DEBUG_PRINT_PERIOD 1500					// ms
-#define PWM_UPDATE_CHECK_PERIOD 10				// ms
+#define MAGNETORQUER_UPDATE_PERIOD 100          // ms
 #define ISENSE_GAIN 50.0f						// gain of the INA185 op amp
 #define ISENSE_R_OHMS 0.030f					// resistance between the op amp + and - inputs
 #define VSENSE_INPUT_OFFSET_TYP_UV 5			// typically, the INA185 can have +/- this many microvolts offset on the input (pre-gain)
@@ -60,9 +61,9 @@ LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_DBG);
 #define R_Z_MT 56								// DC resistance of Z axis magnetorquer
 
 static const int32_t Kff[] = {
-	10000 / (MIN_OPERATING_VBUSP_MV / R_X_MT),	// ~206
-	10000 / (MIN_OPERATING_VBUSP_MV / R_Y_MT),	// ~206
-	10000 / (MIN_OPERATING_VBUSP_MV / R_Z_MT)	// ~75
+	500 / (MIN_OPERATING_VBUSP_MV / R_X_MT),	// ~206
+	500 / (MIN_OPERATING_VBUSP_MV / R_Y_MT),	// ~206
+	500 / (MIN_OPERATING_VBUSP_MV / R_Z_MT)		// ~75
 };
 
 // starting point -- tune these in the lab
@@ -218,9 +219,18 @@ static void handle_can_open_data(void)
 
 	strncpy(CO_OD_RAM.versions.fw_version, &APP_VERSION_STRING[6], ver_size);
 
-	g_adcs_data.mt_pwm_data[0].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_x_setpoint * 100, 0);
-	g_adcs_data.mt_pwm_data[1].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_y_setpoint * 100, 1);
-	g_adcs_data.mt_pwm_data[2].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_z_setpoint * 100, 2);
+	if (g_adcs_data.mt_pwm_data[0].target_current_uA != CO_OD_RAM.magnetorquer.current_x_setpoint) {
+		g_adcs_data.mt_pwm_data[0].target_current_uA = CO_OD_RAM.magnetorquer.current_x_setpoint;
+		LOG_INF("X target uA now: %d", g_adcs_data.mt_pwm_data[0].target_current_uA);
+	}
+	if (g_adcs_data.mt_pwm_data[1].target_current_uA != CO_OD_RAM.magnetorquer.current_y_setpoint) {
+		g_adcs_data.mt_pwm_data[1].target_current_uA = CO_OD_RAM.magnetorquer.current_y_setpoint;
+		LOG_INF("Y target uA now: %d", g_adcs_data.mt_pwm_data[1].target_current_uA);
+	}
+	if (g_adcs_data.mt_pwm_data[2].target_current_uA != CO_OD_RAM.magnetorquer.current_z_setpoint) {
+		g_adcs_data.mt_pwm_data[2].target_current_uA = CO_OD_RAM.magnetorquer.current_z_setpoint;
+		LOG_INF("Z target uA now: %d", g_adcs_data.mt_pwm_data[2].target_current_uA);
+	}
 
 	CO_OD_RAM.gyroscope.pitch_rate = g_adcs_data.gyro_data.x;
 	CO_OD_RAM.gyroscope.yaw_rate = g_adcs_data.gyro_data.y;
@@ -305,14 +315,14 @@ static void print_debug_output(void) {
 		LOG_DBG( "  CO_OD_RAM.gyroscope.pitch_rate_raw = %d", CO_OD_RAM.gyroscope.pitch_rate_raw);
 		LOG_DBG( "  CO_OD_RAM.gyroscope.yaw_rate_raw = %d", CO_OD_RAM.gyroscope.yaw_rate_raw);
 		LOG_DBG( "  CO_OD_RAM.gyroscope.roll_rate_raw = %d", CO_OD_RAM.gyroscope.roll_rate_raw);
-
+#if 0
 		LOG_DBG( "  CO_OD_RAM.accelerometer.x = %d", CO_OD_RAM.accelerometer.x);
 		LOG_DBG( "  CO_OD_RAM.accelerometer.y = %d", CO_OD_RAM.accelerometer.y);
 		LOG_DBG( "  CO_OD_RAM.accelerometer.z = %d", CO_OD_RAM.accelerometer.z);
 		LOG_DBG( "  CO_OD_RAM.accelerometer.x_raw = %d", CO_OD_RAM.accelerometer.X_raw);
 		LOG_DBG( "  CO_OD_RAM.accelerometer.y_raw = %d", CO_OD_RAM.accelerometer.Y_raw);
 		LOG_DBG( "  CO_OD_RAM.accelerometer.z_raw = %d", CO_OD_RAM.accelerometer.Z_raw);
-
+#endif
 		LOG_DBG( "  CO_OD_RAM.temperature = %d", CO_OD_RAM.temperature);
 
 		LOG_DBG( "  CO_OD_RAM.magnetorquer_current_x.current_setpoint = %d", CO_OD_RAM.magnetorquer.current_x_setpoint);
@@ -327,6 +337,7 @@ static void print_debug_output(void) {
 		LOG_DBG( "  CO_OD_RAM.magnetorquer_current.y = %d", CO_OD_RAM.magnetorquer.current_y);
 		LOG_DBG( "  CO_OD_RAM.magnetorquer_current.z = %d", CO_OD_RAM.magnetorquer.current_z);
 
+#if 0
 		LOG_DBG( "  CO_OD_RAM.pos_z_magnetometer_1.x = %d", CO_OD_RAM.pos_z_magnetometer_1.x);
 		LOG_DBG( "  CO_OD_RAM.pos_z_magnetometer_1.y = %d", CO_OD_RAM.pos_z_magnetometer_1.y);
 		LOG_DBG( "  CO_OD_RAM.pos_z_magnetometer_1.z = %d", CO_OD_RAM.pos_z_magnetometer_1.z);
@@ -342,6 +353,7 @@ static void print_debug_output(void) {
 		LOG_DBG( "  CO_OD_RAM.min_z_magnetometer_1.x = %d", CO_OD_RAM.min_z_magnetometer_2.x);
 		LOG_DBG( "  CO_OD_RAM.min_z_magnetometer_1.y = %d", CO_OD_RAM.min_z_magnetometer_2.y);
 		LOG_DBG( "  CO_OD_RAM.min_z_magnetometer_1.z = %d", CO_OD_RAM.min_z_magnetometer_2.z);
+#endif
 
 		for (int i = 0; i < 3; i++) {
 			mt_pwm_phase_data_t *data = &g_adcs_data.mt_pwm_data[i];
@@ -381,12 +393,12 @@ static int32_t calc_pwm_from_uA_setpoint(const int32_t target_uA, int axis)
 	int32_t feed_forward = target_uA * Kff[axis];
 	int32_t error = target_uA - actual_uA;
 
-	pwm = feed_forward + error * Kp[axis];
+	pwm = /*feed_forward +*/ error * Kp[axis];
+	pwm = saturate_int32_t(pwm, -max_pwm_duty_cycle, max_pwm_duty_cycle);
 
 	LOG_DBG("Axis:%d, target_uA:%d, actual_uA:%d, max_pwm:%d, Kff:%d, Kp:%d, ff:%d, error:%d, pwm:%d",
 			axis, target_uA, actual_uA, max_pwm_duty_cycle, Kff[axis], Kp[axis],
 			feed_forward, error, pwm);
-	pwm = saturate_int32_t(pwm, -max_pwm_duty_cycle, max_pwm_duty_cycle);
 	return(pwm);
 
 #if 0
@@ -508,40 +520,34 @@ static int set_pwm_output(mt_pwm_phase_data_t *axes)
 	int err = 0;
 
 	for (int i = 0; i < 3; i++ ) {
-		int32_t t_now = k_uptime_get(); //in milliseconds
 		bool new_state;
 
 		//Updates will come in periodically via CANOpen, this will apply those updates to the PWM outputs.
-		if ((axes[i].last_update_time == 0) ||
-			((t_now - axes[i].last_update_time) > PWM_UPDATE_CHECK_PERIOD)) {
+		if( axes[i].active_pwm_percent != axes[i].goal_pwm_percent ) {
+			LOG_DBG("goal_pwm_percent = %d", axes[i].goal_pwm_percent);
 
-			if( axes[i].active_pwm_percent != axes[i].goal_pwm_percent ) {
-				LOG_DBG("goal_pwm_percent = %d", axes[i].goal_pwm_percent);
-
-				if (axes[i].goal_pwm_percent < 0) {
-					new_state = true;
-				} else {
-					new_state = false;
-				}
-				const int32_t pwm_val = abs(axes[i].goal_pwm_percent);
-
-				// lock scheduler so we minimize delays between changing phase and setting pwm
-				k_sched_lock();
-				if (axes[i].phase_state != new_state) {
-					ret = set_pwm_phase(i, new_state);
-					if (ret) { // this should never be in error, but do the right thing anyway
-						err = ret;
-						k_sched_unlock();
-						continue; // could cause guidance issues? mismatched phase and pwm value?
-					}
-					axes[i].phase_state = new_state;
-				}
-				set_pwm(i, pwm_val); // set_pwm does the scaling from percentage to width
-				k_sched_unlock();
-
-				axes[i].active_pwm_percent = axes[i].goal_pwm_percent;
-				axes[i].last_update_time = t_now;
+			if (axes[i].goal_pwm_percent < 0) {
+				new_state = true;
+			} else {
+				new_state = false;
 			}
+			const int32_t pwm_val = abs(axes[i].goal_pwm_percent);
+
+			// lock scheduler so we minimize delays between changing phase and setting pwm
+			k_sched_lock();
+			if (axes[i].phase_state != new_state) {
+				ret = set_pwm_phase(i, new_state);
+				if (ret) { // this should never be in error, but do the right thing anyway
+					err = ret;
+					k_sched_unlock();
+					continue; // could cause guidance issues? mismatched phase and pwm value?
+				}
+				axes[i].phase_state = new_state;
+			}
+			set_pwm(i, pwm_val); // set_pwm does the scaling from percentage to width
+			k_sched_unlock();
+
+			axes[i].active_pwm_percent = axes[i].goal_pwm_percent;
 		}
 	}
 	return err;
@@ -676,7 +682,11 @@ static void check_magnetorquer_fault(void)
 
 }
 
-#if 0
+#if defined(CONFIG_MAGNETORQUER_EXPLORE)
+
+static int32_t pwm_pct[3] = {0};
+static const char axis_let[3] = "xyz";
+
 // test code
 static int handle_magnetorquer(void *p1, void *p2, void *p3)
 {
@@ -688,18 +698,15 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 
 	init_magnetorquer();
 
-	int32_t x_pwm_pct = 10;
-	int32_t y_pwm_pct = 10;
-	int32_t z_pwm_pct = 0;
-
-	set_pwm_phase(0, x_pwm_pct < 0);
-	set_pwm_phase(1, y_pwm_pct < 0);
-	set_pwm_phase(2, z_pwm_pct < 0);
-	err = set_pwm(0, abs(x_pwm_pct));  // --> ADC
-	err = set_pwm(1, abs(y_pwm_pct));  // --> ADC1
-	err = set_pwm(2, abs(z_pwm_pct));  // --> ADC2
+	set_pwm_phase(0, pwm_pct[0] < 0);
+	set_pwm_phase(1, pwm_pct[1] < 0);
+	set_pwm_phase(2, pwm_pct[2] < 0);
+	err = set_pwm(0, abs(pwm_pct[0]));
+	err = set_pwm(1, abs(pwm_pct[1]));
+	err = set_pwm(2, abs(pwm_pct[2]));
 
 	while (true) {
+#if 0
 		uint32_t adc_val;
 
 		err = acquire_adc_readings();
@@ -714,7 +721,23 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 			}
 			LOG_INF("ADC num %d: %u mV", i, adc_val);
 		}
+#else
+		err = get_current_readings(g_adcs_data.mt_pwm_data);
+		if (err) {
+			LOG_WRN("One or more ADC channels read in error: %d", err);
+		}
 
+		LOG_INF("x V:%.5f, %d uA",
+				(double)g_adcs_data.mt_pwm_data[0].feedback_measurement_V,
+				g_adcs_data.mt_pwm_data[0].feedback_measurement_uA);
+		LOG_INF("y V:%.5f, %d uA",
+				(double)g_adcs_data.mt_pwm_data[1].feedback_measurement_V,
+				g_adcs_data.mt_pwm_data[1].feedback_measurement_uA);
+		LOG_INF("z V:%.5f, %d uA",
+				(double)g_adcs_data.mt_pwm_data[2].feedback_measurement_V,
+				g_adcs_data.mt_pwm_data[2].feedback_measurement_uA);
+
+#endif
 		check_magnetorquer_fault();
 
 		handle_can_open_data();
@@ -723,7 +746,60 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 	}
 }
 
-#else
+#if defined(CONFIG_SHELL)
+static int cmd_mtpwm(const struct shell *sh, size_t argc, char **argv)
+{
+	char chaxis;
+	int axis = -1;
+	int pwm;
+	int err;
+
+	if (argc < 2) {
+		shell_print(sh, "Current pwm values: x=%d, y=%d, z=%d", pwm_pct[0], pwm_pct[1], pwm_pct[2]);
+		return 0;
+	}
+	chaxis = argv[1][0];
+	switch (chaxis) {
+	case 'x':
+		axis = 0;
+		break;
+	case 'y':
+		axis = 1;
+		break;
+	case 'z':
+		axis = 2;
+		break;
+	default:
+		axis = atoi(argv[1]);
+	}
+	if ((axis < 0) || (axis > 3)) {
+		shell_error(sh, "Axis out of range: %d", axis);
+		return 0;
+	}
+	if (argc < 3) {
+		shell_print(sh, "PWM on axis %d = %d", axis, pwm_pct[axis]);
+		return 0;
+	}
+	pwm = atoi(argv[2]);
+	if ((pwm < -10000) || (pwm > 10000)) {
+		shell_error(sh, "PWM out of range: %d", pwm);
+		return 0;
+	}
+	pwm_pct[axis] = pwm;
+	g_adcs_data.mt_pwm_data[axis].goal_pwm_percent = pwm;
+	set_pwm_phase(axis, pwm_pct[axis] < 0);
+	err = set_pwm(axis, abs(pwm_pct[axis]));
+	g_adcs_data.mt_pwm_data[axis].active_pwm_percent = pwm;
+	shell_print(sh, "Set axis %d (%c) pwm = %d; err: %d", axis, axis_let[axis], pwm, err);
+
+	return 0;
+}
+
+SHELL_CMD_ARG_REGISTER(mtpwm, NULL, "mt_pwm [<axis>] [<new id value>]", cmd_mtpwm, 1, 2);
+#endif
+
+#else // not CONFIG_MAGNETORQUER_EXPLORE (normal mode)
+
 static int handle_magnetorquer(void *p1, void *p2, void *p3)
 {
 	int err;
@@ -746,8 +822,9 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 	}
 
 	int64_t t_start = k_uptime_get(); //in milliseconds
-	int64_t t_last = t_start;
 	int64_t t_now = t_start;
+	int64_t t_last = t_start;
+	int64_t t_mt_last = t_start;
 	int i;
 
 	LOG_INF("Starting magnetorquer loop");
@@ -775,14 +852,23 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 			LOG_WRN("One or more magnetometers could not be read: %d", err);
 		}
 
-		err = get_current_readings(g_adcs_data.mt_pwm_data);
-		if (err) {
-			LOG_WRN("One or more ADC channels read in error: %d", err);
-		}
+		//Updates will come in periodically via CANOpen, this will apply those updates to the PWM outputs.
+		if ((t_mt_last == 0) || ((t_now - t_mt_last) > MAGNETORQUER_UPDATE_PERIOD)) {
+			t_mt_last = t_now;
 
-		err = set_pwm_output(g_adcs_data.mt_pwm_data);
-		if (err) {
-			LOG_WRN("One or more PWM channels could not be set: %d", err);
+			err = get_current_readings(g_adcs_data.mt_pwm_data);
+			if (err) {
+				LOG_WRN("One or more ADC channels read in error: %d", err);
+			}
+
+			g_adcs_data.mt_pwm_data[0].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_x_setpoint, 0);
+			g_adcs_data.mt_pwm_data[1].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_y_setpoint, 1);
+			g_adcs_data.mt_pwm_data[2].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_z_setpoint, 2);
+
+			err = set_pwm_output(g_adcs_data.mt_pwm_data);
+			if (err) {
+				LOG_WRN("One or more PWM channels could not be set: %d", err);
+			}
 		}
 
 		check_magnetorquer_fault();
@@ -801,6 +887,7 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 		t_last = t_now;
 	}
 }
-#endif
+
+#endif // CONFIG_MAGNETORQUER_EXPLORE
 
 K_THREAD_DEFINE(magtqr_id, STACK_SIZE, handle_magnetorquer, NULL, NULL, NULL, PRIORITY, 0, 0);
