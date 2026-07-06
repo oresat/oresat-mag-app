@@ -55,22 +55,28 @@ LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_DBG);
 #define MAX_PWM_DUTY_CYCLE_Y 10000
 #define MAX_PWM_DUTY_CYCLE_Z 10000
 
-#define MIN_OPERATING_VBUSP_MV 7400				// set Kff so that we get maximum possible current at 100% duty cycle for mid-point of battery voltage
-#define R_X_MT 153								// DC resistance of X axis magnetorquer
-#define R_Y_MT 153								// DC resistance of Y axis magnetorquer
-#define R_Z_MT 56								// DC resistance of Z axis magnetorquer
+#define OPERATING_VBUSP_MV 8200					// set Kff so that we get maximum possible current at 100% duty cycle for mid-point of battery voltage
+#define R_X_MT 151								// DC resistance of X axis magnetorquer
+#define R_Y_MT 151								// DC resistance of Y axis magnetorquer
+#define R_Z_MT 60								// DC resistance of Z axis magnetorquer
 
-static const int32_t Kff[] = {
-	500 / (MIN_OPERATING_VBUSP_MV / R_X_MT),	// ~206
-	500 / (MIN_OPERATING_VBUSP_MV / R_Y_MT),	// ~206
-	500 / (MIN_OPERATING_VBUSP_MV / R_Z_MT)		// ~75
+static const int32_t max_i_ua[] = {
+	(OPERATING_VBUSP_MV * 1000) / R_X_MT,
+	(OPERATING_VBUSP_MV * 1000) / R_Y_MT,
+	(OPERATING_VBUSP_MV * 1000) / R_Z_MT
+};
+
+static const float Kff[] = {
+	0.9,
+	0.9,
+	0.9
 };
 
 // starting point -- tune these in the lab
-static const int32_t Kp[] = {
-	Kff[0] / 2,
-	Kff[1] / 2,
-	Kff[2] / 2
+static const float Kp[] = {
+	0.1,
+	0.1,
+	0.1
 };
 
 static const int32_t max_pwm_duty_cycles[] = {
@@ -387,18 +393,19 @@ static int32_t calc_pwm_from_uA_setpoint(const int32_t target_uA, int axis)
 		return pwm;
 	}
 
+	int32_t goal_uA = saturate_int32_t(target_uA, -max_i_ua[axis], +max_i_ua[axis]);
 	const int32_t actual_uA = g_adcs_data.mt_pwm_data[axis].feedback_measurement_uA;
-	const int32_t max_pwm_duty_cycle = max_pwm_duty_cycles[axis];
 
-	int32_t feed_forward = target_uA * Kff[axis];
+	float feed_forward = goal_uA * Kff[axis];
 	int32_t error = target_uA - actual_uA;
+	float p = error * Kp[axis];
 
-	pwm = /*feed_forward +*/ error * Kp[axis];
-	pwm = saturate_int32_t(pwm, -max_pwm_duty_cycle, max_pwm_duty_cycle);
+	pwm = (int32_t)(((/*feed_forward + */ p) * max_pwm_duty_cycles[axis]) / max_i_ua[axis]);
+	pwm = saturate_int32_t(pwm, -max_pwm_duty_cycles[axis], max_pwm_duty_cycles[axis]);
 
-	LOG_DBG("Axis:%d, target_uA:%d, actual_uA:%d, max_pwm:%d, Kff:%d, Kp:%d, ff:%d, error:%d, pwm:%d",
-			axis, target_uA, actual_uA, max_pwm_duty_cycle, Kff[axis], Kp[axis],
-			feed_forward, error, pwm);
+	LOG_DBG("Axis:%d, target_uA:%d, goal_uA:%d, actual_uA:%d, max_pwm:%d, ff:%.3f, error:%d, p:%.3f, pwm:%d",
+			axis, target_uA, goal_uA, actual_uA, max_pwm_duty_cycles[axis], 
+			(double)feed_forward, error, (double)p, pwm);
 	return(pwm);
 
 #if 0
@@ -758,6 +765,61 @@ static int cmd_mtpwm(const struct shell *sh, size_t argc, char **argv)
 		shell_print(sh, "Current pwm values: x=%d, y=%d, z=%d", pwm_pct[0], pwm_pct[1], pwm_pct[2]);
 		return 0;
 	}
+
+	chaxis = argv[1][0];
+	switch (chaxis) {
+	case 'x':
+		axis = 0;
+		break;
+	case 'y':
+		axis = 1;
+		break;
+	case 'z':
+		axis = 2;
+		break;
+	default:
+		axis = atoi(argv[1]);
+	}
+
+	if ((axis < 0) || (axis > 3)) {
+		shell_error(sh, "Axis out of range: %d", axis);
+		return 0;
+	}
+	if (argc < 3) {
+		shell_print(sh, "PWM on axis %d = %d", axis, pwm_pct[axis]);
+		return 0;
+	}
+
+	pwm = atoi(argv[2]);
+	if ((pwm < -10000) || (pwm > 10000)) {
+		shell_error(sh, "PWM out of range: %d", pwm);
+		return 0;
+	}
+	pwm_pct[axis] = pwm;
+	g_adcs_data.mt_pwm_data[axis].goal_pwm_percent = pwm;
+
+	set_pwm_phase(axis, pwm_pct[axis] < 0);
+	err = set_pwm(axis, abs(pwm_pct[axis]));
+
+	g_adcs_data.mt_pwm_data[axis].active_pwm_percent = pwm;
+	shell_print(sh, "Set axis %d (%c) pwm = %d; err: %d", axis, axis_let[axis], pwm, err);
+
+	return 0;
+}
+
+static int cmd_frqpwm(const struct shell *sh, size_t argc, char **argv)
+{
+	char chaxis;
+	int axis = -1;
+	int freq;
+	int err;
+
+	if (argc < 2) {
+		shell_print(sh, "Current pwm frequencies: x=%u, y=%u, z=%u",
+					get_pwm_frequency(0), get_pwm_frequency(1), get_pwm_frequency(2));
+		return 0;
+	}
+
 	chaxis = argv[1][0];
 	switch (chaxis) {
 	case 'x':
@@ -777,25 +839,61 @@ static int cmd_mtpwm(const struct shell *sh, size_t argc, char **argv)
 		return 0;
 	}
 	if (argc < 3) {
-		shell_print(sh, "PWM on axis %d = %d", axis, pwm_pct[axis]);
+		shell_print(sh, "Frequency on axis %d = %d", axis, get_pwm_frequency(axis));
 		return 0;
 	}
-	pwm = atoi(argv[2]);
-	if ((pwm < -10000) || (pwm > 10000)) {
-		shell_error(sh, "PWM out of range: %d", pwm);
+	freq = atoi(argv[2]);
+	if ((freq < 1) || (freq > 100000)) {
+		shell_error(sh, "Frequency out of range: %d", freq);
 		return 0;
 	}
-	pwm_pct[axis] = pwm;
-	g_adcs_data.mt_pwm_data[axis].goal_pwm_percent = pwm;
-	set_pwm_phase(axis, pwm_pct[axis] < 0);
-	err = set_pwm(axis, abs(pwm_pct[axis]));
-	g_adcs_data.mt_pwm_data[axis].active_pwm_percent = pwm;
-	shell_print(sh, "Set axis %d (%c) pwm = %d; err: %d", axis, axis_let[axis], pwm, err);
+	err = set_pwm_frequency(axis, freq);
+	shell_print(sh, "Set axis %d (%c) pwm frequency = %u; err: %d", axis, axis_let[axis], freq, err);
 
 	return 0;
 }
 
-SHELL_CMD_ARG_REGISTER(mtpwm, NULL, "mt_pwm [<axis>] [<new id value>]", cmd_mtpwm, 1, 2);
+static int cmd_ua2pwm(const struct shell *sh, size_t argc, char **argv)
+{
+	char chaxis;
+	int axis = -1;
+	int32_t target_ua;
+	int32_t pwm;
+
+	if (argc < 3) {
+		shell_error(sh, "Missing parameters");
+		return 0;
+	}
+
+	chaxis = argv[1][0];
+	switch (chaxis) {
+	case 'x':
+		axis = 0;
+		break;
+	case 'y':
+		axis = 1;
+		break;
+	case 'z':
+		axis = 2;
+		break;
+	default:
+		axis = atoi(argv[1]);
+	}
+	if ((axis < 0) || (axis > 3)) {
+		shell_error(sh, "Axis out of range: %d", axis);
+		return 0;
+	}
+	target_ua = (int32_t)atoi(argv[2]);
+	pwm = calc_pwm_from_uA_setpoint(target_ua, axis);
+
+	shell_print(sh, "Axis %d (%c) pwm for %d uA = %d", axis, axis_let[axis], pwm, target_ua);
+
+	return 0;
+}
+
+SHELL_CMD_ARG_REGISTER(mtpwm, NULL,  "mtpwm  [<axis>] [<new duty cycle value>]", cmd_mtpwm, 1, 2);
+SHELL_CMD_ARG_REGISTER(frqpwm, NULL, "frqpwm [<axis>] [<new frequency in Hz>]", cmd_frqpwm, 1, 2);
+SHELL_CMD_ARG_REGISTER(ua2pwm, NULL, "ua2pwm [<axis>] [<target current in uA>]", cmd_ua2pwm, 3, 1);
 #endif
 
 #else // not CONFIG_MAGNETORQUER_EXPLORE (normal mode)

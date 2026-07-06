@@ -62,6 +62,7 @@ typedef struct pwm_info {
 	int channel;
 	uint64_t cps;
 	uint32_t period;
+	uint32_t frequency;
 } pwm_info;
 
 static pwm_info pwm_table[] = {
@@ -91,9 +92,33 @@ int init_pwm(void)
 			return err;
 		}
 		p->period = (p->cps + PWM_FREQUENCY / 2) / PWM_FREQUENCY;
+		p->frequency = PWM_FREQUENCY;
 		LOG_DBG("pwm%d (%s): cycles_per_sec:%lld, period:%d", i, p->dev->name, p->cps, p->period);
 	}
 	return 0;
+}
+
+int set_pwm_frequency(unsigned int pwm_num, uint32_t frequency)
+{
+	pwm_info *p;
+
+	if (pwm_num >= NUM_PWMS) {
+		LOG_ERR("Incorrect pwm number set: %u; max is %u", pwm_num, NUM_PWMS);
+		return -ENODEV;
+	}
+	p = &pwm_table[pwm_num];
+	p->period = (p->cps + frequency / 2) / frequency;
+	p->frequency = frequency;
+	return 0;
+}
+
+uint32_t get_pwm_frequency(unsigned int pwm_num)
+{
+	if (pwm_num >= NUM_PWMS) {
+		LOG_ERR("Incorrect pwm number set: %u; max is %u", pwm_num, NUM_PWMS);
+		return 0;
+	}
+	return pwm_table[pwm_num].frequency;
 }
 
 int set_pwm(unsigned int pwm_num, uint32_t scaled_percent)
