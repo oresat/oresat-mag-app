@@ -54,7 +54,7 @@ LOG_MODULE_REGISTER(oresat_pwm, CONFIG_PWM_LOG_LEVEL);
 #define PWM_NODE_0 DT_ALIAS(pwm0)
 #define PWM_NODE_1 DT_ALIAS(pwm1)
 
-#define PWM_FREQUENCY 2500U
+#define PWM_FREQUENCY 20000U
 #define PERCENT_SCALE 10000U
 
 typedef struct pwm_info {

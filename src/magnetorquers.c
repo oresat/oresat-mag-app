@@ -363,10 +363,10 @@ static void print_debug_output(void) {
 
 		for (int i = 0; i < 3; i++) {
 			mt_pwm_phase_data_t *data = &g_adcs_data.mt_pwm_data[i];
-			LOG_DBG( "  i_sense[%d] = %d uA, %.3f mV",
+			LOG_DBG( "  i_sense[%d] = %.3f mA, %.3f mV",
 					i,
-					data->feedback_measurement_uA,
-					(double)(data->feedback_measurement_V * 1000.0f));
+					(double)data->feedback_measurement_uA / 1000.0,
+					(double)data->feedback_measurement_V * 1000.0);
 		}
 		//LOG_DBG( "  CO_EM_GENERIC_ERROR:  %u", CO_isError(CO->em, CO_EM_GENERIC_ERROR));
 	}
@@ -400,11 +400,11 @@ static int32_t calc_pwm_from_uA_setpoint(const int32_t target_uA, int axis)
 	int32_t error = target_uA - actual_uA;
 	float p = error * Kp[axis];
 
-	pwm = (int32_t)(((/*feed_forward + */ p) * max_pwm_duty_cycles[axis]) / max_i_ua[axis]);
+	pwm = (int32_t)(((feed_forward + p) * max_pwm_duty_cycles[axis]) / max_i_ua[axis]);
 	pwm = saturate_int32_t(pwm, -max_pwm_duty_cycles[axis], max_pwm_duty_cycles[axis]);
 
-	LOG_DBG("Axis:%d, target_uA:%d, goal_uA:%d, actual_uA:%d, max_pwm:%d, ff:%.3f, error:%d, p:%.3f, pwm:%d",
-			axis, target_uA, goal_uA, actual_uA, max_pwm_duty_cycles[axis], 
+	LOG_DBG("Axis:%d, target_mA:%.3f, goal_mA:%.3f, actual_mA:%.3f, max_pwm:%d, ff:%.3f, error:%d, p:%.3f, pwm:%d",
+			axis, target_uA / 1000.0, goal_uA / 1000.0, actual_uA / 1000.0, max_pwm_duty_cycles[axis], 
 			(double)feed_forward, error, (double)p, pwm);
 	return(pwm);
 
@@ -734,15 +734,15 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 			LOG_WRN("One or more ADC channels read in error: %d", err);
 		}
 
-		LOG_INF("x V:%.5f, %d uA",
+		LOG_INF("x V:%.5f, %.3f mA",
 				(double)g_adcs_data.mt_pwm_data[0].feedback_measurement_V,
-				g_adcs_data.mt_pwm_data[0].feedback_measurement_uA);
-		LOG_INF("y V:%.5f, %d uA",
+				g_adcs_data.mt_pwm_data[0].feedback_measurement_uA / 1000.0);
+		LOG_INF("y V:%.5f, %.3f mA",
 				(double)g_adcs_data.mt_pwm_data[1].feedback_measurement_V,
-				g_adcs_data.mt_pwm_data[1].feedback_measurement_uA);
-		LOG_INF("z V:%.5f, %d uA",
+				g_adcs_data.mt_pwm_data[1].feedback_measurement_uA / 1000.0);
+		LOG_INF("z V:%.5f, %.3f mA",
 				(double)g_adcs_data.mt_pwm_data[2].feedback_measurement_V,
-				g_adcs_data.mt_pwm_data[2].feedback_measurement_uA);
+				g_adcs_data.mt_pwm_data[2].feedback_measurement_uA / 1000.0);
 
 #endif
 		check_magnetorquer_fault();
