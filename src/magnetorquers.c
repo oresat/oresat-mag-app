@@ -308,6 +308,22 @@ static void handle_can_open_data(void)
 	CO_UNLOCK_OD();
 }
 
+static void process_can_open_targets(adcs_data_t *data)
+{
+	if (data->mt_pwm_data[0].target_changed) {
+		data->mt_pwm_data[0].target_changed = false;
+		data->mt_pwm_data[0].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_x_setpoint, 0);
+	}
+	if (data->mt_pwm_data[1].target_changed) {
+		data->mt_pwm_data[1].target_changed = false;
+		data->mt_pwm_data[1].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_y_setpoint, 1);
+	}
+	if (data->mt_pwm_data[2].target_changed) {
+		data->mt_pwm_data[2].target_changed = false;
+		data->mt_pwm_data[2].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_z_setpoint, 2);
+	}
+}
+
 static void print_debug_output(void) {
 	static int64_t last_print_time = 0;
 	int64_t now = k_uptime_get();
@@ -698,10 +714,38 @@ static void check_magnetorquer_fault(void)
 static int32_t pwm_pct[3] = {0};
 static const char axis_let[3] = "xyz";
 
+typedef enum test_modes {
+	TM_OFF,
+	TM_ADC,
+	TM_CURRENT,
+	TM_LOOP,
+	TM_MODE_COUNT // number of possible modes
+} test_modes;
+
+typedef struct {
+	const char *name;
+	const char *desc;
+} test_mode_info;
+
+static test_mode_info tm_info[] = {
+	{"TM_OFF", "only shell"},
+	{"TM_ADC", "read and display ADC sense channels"},
+	{"TM_CURRENT", "read and display current sense measurements"},
+	{"TM_LOOP", "run mt control loop"}
+};
+
+static test_modes mt_test_mode;
+
 // test code
 static int handle_magnetorquer(void *p1, void *p2, void *p3)
 {
 	int err;
+	uint32_t adc_val;
+	int64_t t_start = k_uptime_get(); //in milliseconds
+	int64_t t_now = t_start;
+	int64_t t_last = t_start;
+	int64_t t_mt_last = t_start;
+	test_modes active_mode = TM_OFF;
 
 	k_thread_name_set(magtqr_id, "magtqr_thread");
 
@@ -716,44 +760,77 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 	err = set_pwm(1, abs(pwm_pct[1]));
 	err = set_pwm(2, abs(pwm_pct[2]));
 
+	LOG_INF("Testing interactive test loop");
 	while (true) {
-#if 0
-		uint32_t adc_val;
 
-		err = acquire_adc_readings();
-		if (err) {
-			return 0;
+		if ((t_mt_last == 0) || ((t_now - t_mt_last) > MAGNETORQUER_UPDATE_PERIOD)) {
+			t_mt_last = t_now;
+			active_mode = mt_test_mode; // use the user-set mode now
+		} else {
+			active_mode = TM_OFF; // not time to execute user's mode yet
 		}
 
-		for (int i = 0; i < get_num_adc_channels(); i++) {
-			err = read_adc(i, &adc_val);
+		switch (active_mode) {
+		case TM_OFF:
+			break;
+		case TM_ADC:
+			err = acquire_adc_readings();
 			if (err) {
-				continue;
+				return 0;
 			}
-			LOG_INF("ADC num %d: %u mV", i, adc_val);
-		}
-#else
-		err = get_current_readings(g_adcs_data.mt_pwm_data);
-		if (err) {
-			LOG_WRN("One or more ADC channels read in error: %d", err);
+			for (int i = 0; i < get_num_adc_channels(); i++) {
+				err = read_adc(i, &adc_val);
+				if (err) {
+					continue;
+				}
+				LOG_INF("ADC num %d: %u mV", i, adc_val);
+			}
+			break;
+		case TM_CURRENT:
+			err = get_current_readings(g_adcs_data.mt_pwm_data);
+			if (err) {
+				LOG_WRN("One or more ADC channels read in error: %d", err);
+			}
+
+			LOG_INF("x V:%.5f, %.3f mA",
+					(double)g_adcs_data.mt_pwm_data[0].feedback_measurement_V,
+					g_adcs_data.mt_pwm_data[0].feedback_measurement_uA / 1000.0);
+			LOG_INF("y V:%.5f, %.3f mA",
+					(double)g_adcs_data.mt_pwm_data[1].feedback_measurement_V,
+					g_adcs_data.mt_pwm_data[1].feedback_measurement_uA / 1000.0);
+			LOG_INF("z V:%.5f, %.3f mA",
+					(double)g_adcs_data.mt_pwm_data[2].feedback_measurement_V,
+					g_adcs_data.mt_pwm_data[2].feedback_measurement_uA / 1000.0);
+			break;
+		case TM_LOOP:
+			err = get_current_readings(g_adcs_data.mt_pwm_data);
+			if (err) {
+				LOG_WRN("One or more ADC channels read in error: %d", err);
+			}
+
+			process_can_open_targets(&g_adcs_data);
+
+			err = set_pwm_output(g_adcs_data.mt_pwm_data);
+			if (err) {
+				LOG_WRN("One or more PWM channels could not be set: %d", err);
+			}
+			break;
+		default:
+			break;
 		}
 
-		LOG_INF("x V:%.5f, %.3f mA",
-				(double)g_adcs_data.mt_pwm_data[0].feedback_measurement_V,
-				g_adcs_data.mt_pwm_data[0].feedback_measurement_uA / 1000.0);
-		LOG_INF("y V:%.5f, %.3f mA",
-				(double)g_adcs_data.mt_pwm_data[1].feedback_measurement_V,
-				g_adcs_data.mt_pwm_data[1].feedback_measurement_uA / 1000.0);
-		LOG_INF("z V:%.5f, %.3f mA",
-				(double)g_adcs_data.mt_pwm_data[2].feedback_measurement_V,
-				g_adcs_data.mt_pwm_data[2].feedback_measurement_uA / 1000.0);
-
-#endif
 		check_magnetorquer_fault();
 
 		handle_can_open_data();
 
-		k_msleep(1000);
+		t_now = k_uptime_get();
+		int32_t t_sleep = (int32_t)(ITERATION_PERIOD - (t_now - t_last));
+
+		if (t_sleep <= 0) {
+			t_sleep = 1;
+		}
+		k_msleep(t_sleep);
+		t_last = t_now;
 	}
 }
 
@@ -895,9 +972,53 @@ static int cmd_ua2pwm(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+static int cmd_mtmode(const struct shell *sh, size_t argc, char **argv)
+{
+	int i;
+
+	if (argc < 2) {
+		shell_print(sh, "Current mt mode: %d (%s: %s)",
+					mt_test_mode,
+					tm_info[mt_test_mode].name,
+					tm_info[mt_test_mode].desc);
+		return 0;
+	}
+
+	if ((argv[1][0] == '-') && (argv[1][1] == 'h')) {
+		for (i = 0; i < TM_MODE_COUNT; i++) {
+			shell_print(sh, "Mode %d: %s: %s", i, tm_info[i].name, tm_info[i].desc);
+		}
+		return 0;
+	}
+
+	const char *sel_mode = argv[1];
+	const char *name;
+
+	for (i = 0; i < TM_MODE_COUNT; i++) {
+		name = tm_info[i].name;
+		if (strncmp(sel_mode, name, strlen(name)) == 0) {
+			mt_test_mode = (test_modes)i;
+		}
+	}
+	if (i >= TM_MODE_COUNT) {
+		int mode = atoi(sel_mode);
+
+		if ((mode >= 0) && (mode < TM_MODE_COUNT)) {
+			mt_test_mode = (test_modes)mode;
+		} else {
+			shell_error(sh, "Mode '%s' not found.", sel_mode);
+			return 0;
+		}
+	}
+	shell_print(sh, "Selected mode: %s: %s", tm_info[mt_test_mode].name, tm_info[mt_test_mode].desc);
+
+	return 0;
+}
+
 SHELL_CMD_ARG_REGISTER(mtpwm, NULL,  "mtpwm  [<axis>] [<new duty cycle value>]", cmd_mtpwm, 1, 2);
 SHELL_CMD_ARG_REGISTER(frqpwm, NULL, "frqpwm [<axis>] [<new frequency in Hz>]", cmd_frqpwm, 1, 2);
 SHELL_CMD_ARG_REGISTER(ua2pwm, NULL, "ua2pwm [<axis>] [<target current in uA>]", cmd_ua2pwm, 3, 1);
+SHELL_CMD_ARG_REGISTER(mtmode, NULL, "mtmode [<num>] | [-h]", cmd_mtmode, 1, 1);
 #endif
 
 #else // not CONFIG_MAGNETORQUER_EXPLORE (normal mode)
@@ -910,12 +1031,6 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 	k_sleep(K_MSEC(MAGNETORQUER_STARTUP_DELAY));
 
 	LOG_INF("Starting MAGNETORQUER thread");
-
-#if 0
-	err = set_pwm(0, 2500);
-	err = set_pwm(1, 5000);
-	err = set_pwm(2, 7500);
-#endif
 
 	err = init_magnetorquer();
 	if (err) {
@@ -963,18 +1078,7 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 				LOG_WRN("One or more ADC channels read in error: %d", err);
 			}
 
-			if (g_adcs_data.mt_pwm_data[0].target_changed) {
-				g_adcs_data.mt_pwm_data[0].target_changed = false;
-				g_adcs_data.mt_pwm_data[0].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_x_setpoint, 0);
-			}
-			if (g_adcs_data.mt_pwm_data[1].target_changed) {
-				g_adcs_data.mt_pwm_data[1].target_changed = false;
-				g_adcs_data.mt_pwm_data[1].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_y_setpoint, 1);
-			}
-			if (g_adcs_data.mt_pwm_data[2].target_changed) {
-				g_adcs_data.mt_pwm_data[2].target_changed = false;
-				g_adcs_data.mt_pwm_data[2].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_z_setpoint, 2);
-			}
+			process_can_open_targets(&g_adcs_data);
 
 			err = set_pwm_output(g_adcs_data.mt_pwm_data);
 			if (err) {
