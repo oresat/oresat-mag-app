@@ -56,27 +56,27 @@ LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_DBG);
 #define MAX_PWM_DUTY_CYCLE_Z 10000
 
 #define OPERATING_VBUSP_MV 8200					// set Kff so that we get maximum possible current at 100% duty cycle for mid-point of battery voltage
-#define R_X_MT 151								// DC resistance of X axis magnetorquer
-#define R_Y_MT 151								// DC resistance of Y axis magnetorquer
-#define R_Z_MT 60								// DC resistance of Z axis magnetorquer
+#define R_X_MT 15.5								// DC resistance of X axis magnetorquer
+#define R_Y_MT 15.5								// DC resistance of Y axis magnetorquer
+#define R_Z_MT 60.0								// DC resistance of Z axis magnetorquer
 
 static const int32_t max_i_ua[] = {
-	(OPERATING_VBUSP_MV * 1000) / R_X_MT,
-	(OPERATING_VBUSP_MV * 1000) / R_Y_MT,
-	(OPERATING_VBUSP_MV * 1000) / R_Z_MT
+	(int32_t)((OPERATING_VBUSP_MV * 1000) / R_X_MT),
+	(int32_t)((OPERATING_VBUSP_MV * 1000) / R_Y_MT),
+	(int32_t)((OPERATING_VBUSP_MV * 1000) / R_Z_MT)
 };
 
 static const float Kff[] = {
-	0.9,
-	0.9,
-	0.9
+	0.95,
+	0.95,
+	0.95
 };
 
 // starting point -- tune these in the lab
 static const float Kp[] = {
-	0.1,
-	0.1,
-	0.1
+	0.5,
+	0.5,
+	0.5
 };
 
 static const int32_t max_pwm_duty_cycles[] = {
@@ -91,6 +91,7 @@ static uint32_t iterations;
 
 typedef struct {
 	int32_t target_current_uA;			// ADCS code on C3 requests this over CAN
+	bool target_changed;				// true if the C3 has changed the value
 	int32_t goal_pwm_percent;			// Negative values indicate the phase should be inverted
 
 	int32_t active_pwm_percent;			// 0-10000
@@ -227,14 +228,17 @@ static void handle_can_open_data(void)
 
 	if (g_adcs_data.mt_pwm_data[0].target_current_uA != CO_OD_RAM.magnetorquer.current_x_setpoint) {
 		g_adcs_data.mt_pwm_data[0].target_current_uA = CO_OD_RAM.magnetorquer.current_x_setpoint;
+		g_adcs_data.mt_pwm_data[0].target_changed = true;
 		LOG_INF("X target uA now: %d", g_adcs_data.mt_pwm_data[0].target_current_uA);
 	}
 	if (g_adcs_data.mt_pwm_data[1].target_current_uA != CO_OD_RAM.magnetorquer.current_y_setpoint) {
 		g_adcs_data.mt_pwm_data[1].target_current_uA = CO_OD_RAM.magnetorquer.current_y_setpoint;
+		g_adcs_data.mt_pwm_data[1].target_changed = true;
 		LOG_INF("Y target uA now: %d", g_adcs_data.mt_pwm_data[1].target_current_uA);
 	}
 	if (g_adcs_data.mt_pwm_data[2].target_current_uA != CO_OD_RAM.magnetorquer.current_z_setpoint) {
 		g_adcs_data.mt_pwm_data[2].target_current_uA = CO_OD_RAM.magnetorquer.current_z_setpoint;
+		g_adcs_data.mt_pwm_data[2].target_changed = true;
 		LOG_INF("Z target uA now: %d", g_adcs_data.mt_pwm_data[2].target_current_uA);
 	}
 
@@ -959,9 +963,18 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 				LOG_WRN("One or more ADC channels read in error: %d", err);
 			}
 
-			g_adcs_data.mt_pwm_data[0].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_x_setpoint, 0);
-			g_adcs_data.mt_pwm_data[1].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_y_setpoint, 1);
-			g_adcs_data.mt_pwm_data[2].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_z_setpoint, 2);
+			if (g_adcs_data.mt_pwm_data[0].target_changed) {
+				g_adcs_data.mt_pwm_data[0].target_changed = false;
+				g_adcs_data.mt_pwm_data[0].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_x_setpoint, 0);
+			}
+			if (g_adcs_data.mt_pwm_data[1].target_changed) {
+				g_adcs_data.mt_pwm_data[1].target_changed = false;
+				g_adcs_data.mt_pwm_data[1].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_y_setpoint, 1);
+			}
+			if (g_adcs_data.mt_pwm_data[2].target_changed) {
+				g_adcs_data.mt_pwm_data[2].target_changed = false;
+				g_adcs_data.mt_pwm_data[2].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_z_setpoint, 2);
+			}
 
 			err = set_pwm_output(g_adcs_data.mt_pwm_data);
 			if (err) {
