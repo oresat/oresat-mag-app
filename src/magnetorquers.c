@@ -67,17 +67,25 @@ static const int32_t max_i_ua[] = {
 	(int32_t)((OPERATING_VBUSP_MV * 1000) / R_Z_MT)
 };
 
+// feedforward constants per axis
 static const float Kff[] = {
 	0.95,
 	0.95,
 	0.95
 };
 
-// starting point -- tune these in the lab
+// proportional constants per axis
 static const float Kp[] = {
-	0.5,
-	0.5,
-	0.5
+	0.6,
+	0.6,
+	0.6
+};
+
+// integral constants per axis
+static const float Ki[] = {
+	0.1,
+	0.1,
+	0.1
 };
 
 static const int32_t max_pwm_duty_cycles[] = {
@@ -101,6 +109,7 @@ typedef struct {
 	uint32_t ofs_mv;					// compensation for inherent op-amp input voltage offset
 	float feedback_measurement_V;		// Volts, Note: this is the average voltage while the PWM output is high.
 	int32_t feedback_measurement_uA;	// uA. Note: this is the average current flowing while the PWM output is high. It does not represent overall average current.
+	int32_t integral;					// integral value for controller
 
 	bool phase_state;
 	uint8_t phase_gpio_pin_number;
@@ -400,30 +409,55 @@ static int32_t saturate_int32_t(const int32_t v, const int32_t min, const int32_
 	return (v);
 }
 
+static float saturate_float(const float v, const float min, const float max) {
+	if (v >= max)
+		return (max);
+
+	else if (v <= min)
+		return (min);
+
+	return (v);
+}
+
 /**
  * return value is in the range of 0 to 10000
  */
 static int32_t calc_pwm_from_uA_setpoint(const int32_t target_uA, int axis)
 {
 	int32_t pwm = 0;
+	int32_t goal_uA;
+	int32_t actual_uA;
+	int32_t error;
+	float ff;
+	float p;
+	float i;
 
 	if (target_uA == 0) {
 		return pwm;
 	}
 
-	int32_t goal_uA = saturate_int32_t(target_uA, -max_i_ua[axis], +max_i_ua[axis]);
-	const int32_t actual_uA = g_adcs_data.mt_pwm_data[axis].feedback_measurement_uA;
+	goal_uA = saturate_int32_t(target_uA, -max_i_ua[axis], +max_i_ua[axis]);
+	actual_uA = g_adcs_data.mt_pwm_data[axis].feedback_measurement_uA;
 
-	float feed_forward = goal_uA * Kff[axis];
-	int32_t error = target_uA - actual_uA;
-	float p = error * Kp[axis];
+	ff = goal_uA * Kff[axis];
 
-	pwm = (int32_t)(((feed_forward + p) * max_pwm_duty_cycles[axis]) / max_i_ua[axis]);
+	error = target_uA - actual_uA;
+	p = error * Kp[axis];
+
+	i = (float)g_adcs_data.mt_pwm_data[axis].integral;
+
+	i += error * Ki[axis];
+	// don't allow integral to grow without bounds ("wind-up")
+	i = saturate_float(i, -max_i_ua[axis], max_i_ua[axis]);
+
+	pwm = (int32_t)(((ff + p + i) * max_pwm_duty_cycles[axis]) / max_i_ua[axis]);
 	pwm = saturate_int32_t(pwm, -max_pwm_duty_cycles[axis], max_pwm_duty_cycles[axis]);
 
-	LOG_DBG("Axis:%d, target_mA:%.3f, goal_mA:%.3f, actual_mA:%.3f, max_pwm:%d, ff:%.3f, error:%d, p:%.3f, pwm:%d",
+	g_adcs_data.mt_pwm_data[axis].integral = i;
+
+	LOG_DBG("Axis:%d, target_mA:%.3f, goal_mA:%.3f, actual_mA:%.3f, max_pwm:%d, ff:%.3f, error:%d, p:%.3f, i:%.3f, pwm:%d",
 			axis, target_uA / 1000.0, goal_uA / 1000.0, actual_uA / 1000.0, max_pwm_duty_cycles[axis], 
-			(double)feed_forward, error, (double)p, pwm);
+			(double)ff, error, (double)p, (double)i, pwm);
 	return(pwm);
 
 #if 0
@@ -1120,6 +1154,9 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 	int64_t t_last = t_start;
 	int64_t t_mt_last = t_start;
 	int i;
+	int16_t gx;
+	int16_t gy;
+	int16_t gz;
 
 	LOG_INF("Starting magnetorquer loop");
 	for (;;) {
@@ -1128,10 +1165,19 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 
 		// x, y, and z are in units of: (for GYRO_FS_SEL = 7) 2097.2LSB/(º/s)
 		// temp is in units of decicentigrade (degrees C times 10)
-		get_gyro_data(&g_adcs_data.gyro_data.x,
-					  &g_adcs_data.gyro_data.y,
-					  &g_adcs_data.gyro_data.z,
+		get_gyro_data(&gx,
+					  &gy,
+					  &gz,
 					  &g_adcs_data.temp_data);
+
+		// correct the orientation to be in the spacecraft frame of reference,
+		// not the sensor IC frame of reference
+		// sensor +x is satellite +y
+		// sensor -y is satellite +x
+		// sensor +z is satellite +z
+		g_adcs_data.gyro_data.x = -gy;
+		g_adcs_data.gyro_data.y = gx;
+		g_adcs_data.gyro_data.z = gz;
 
 		for (i = 0; i < NUM_MAGS; i++) {
 			int ret = get_mag_reading(i,
