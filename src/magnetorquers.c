@@ -15,6 +15,7 @@
 #include <CO_OD.h>
 #include <version.h>
 #include <app_version.h>
+#include <unistd.h>
 
 #include "dac.h"
 #include "pwm.h"
@@ -23,7 +24,7 @@
 #include "magnetometer.h"
 #include "windowed_average.h"
 
-LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_INF);
 
 /* size of stack area used by each thread */
 #define STACK_SIZE 4096
@@ -131,6 +132,16 @@ static adcs_data_t g_adcs_data = {
 	.mt_pwm_data[2].ofs_mv_store.name = "adcz"
 };
 
+static int32_t *setpoints[] = { // make it easy to index by numeric axis
+	&CO_OD_RAM.magnetorquer.current_x_setpoint,
+	&CO_OD_RAM.magnetorquer.current_y_setpoint,
+	&CO_OD_RAM.magnetorquer.current_z_setpoint
+};
+
+static char *axis_names[] = {
+	"X", "Y", "Z"
+};
+
 typedef enum {
 	EC_MAG_0_MZ_1 = 0,
 	EC_MAG_1_MZ_2,
@@ -212,11 +223,12 @@ static int init_gpios(void)
 //
 // oresat-configs sdo [-h] [--oresat {0,0.5,1}] BUS NODE MODE INDEX SUBINDEX [VALUE]
 // so for you oresat-configs sdo can0 battery_1 read <index> <subindex>
-// oresat-configs sdo can0 adcs read  versions fw_version
+// oresat-configs sdo can0 adcs read versions fw_version
 // oresat-configs sdo can0 adcs read temperature foo
 // oresat-configs sdo can0 adcs read magnetorquer pwm_x
 // oresat-configs sdo can0 adcs read magnetorquer current_x
 // oresat-configs sdo can0 adcs write magnetorquer current_x_setpoint 1000
+// oresat-configs sdo can0 adcs read pos_z_magnetometer_1 x
 
 static void handle_can_open_data(void)
 {
@@ -226,20 +238,12 @@ static void handle_can_open_data(void)
 
 	strncpy(CO_OD_RAM.versions.fw_version, &APP_VERSION_STRING[6], ver_size);
 
-	if (g_adcs_data.mt_pwm_data[0].target_current_uA != CO_OD_RAM.magnetorquer.current_x_setpoint) {
-		g_adcs_data.mt_pwm_data[0].target_current_uA = CO_OD_RAM.magnetorquer.current_x_setpoint;
-		g_adcs_data.mt_pwm_data[0].target_changed = true;
-		LOG_INF("X target uA now: %d", g_adcs_data.mt_pwm_data[0].target_current_uA);
-	}
-	if (g_adcs_data.mt_pwm_data[1].target_current_uA != CO_OD_RAM.magnetorquer.current_y_setpoint) {
-		g_adcs_data.mt_pwm_data[1].target_current_uA = CO_OD_RAM.magnetorquer.current_y_setpoint;
-		g_adcs_data.mt_pwm_data[1].target_changed = true;
-		LOG_INF("Y target uA now: %d", g_adcs_data.mt_pwm_data[1].target_current_uA);
-	}
-	if (g_adcs_data.mt_pwm_data[2].target_current_uA != CO_OD_RAM.magnetorquer.current_z_setpoint) {
-		g_adcs_data.mt_pwm_data[2].target_current_uA = CO_OD_RAM.magnetorquer.current_z_setpoint;
-		g_adcs_data.mt_pwm_data[2].target_changed = true;
-		LOG_INF("Z target uA now: %d", g_adcs_data.mt_pwm_data[2].target_current_uA);
+	for (int i = 0; i < 3; i++) {
+		if (g_adcs_data.mt_pwm_data[i].target_current_uA != *setpoints[i]) {
+			g_adcs_data.mt_pwm_data[i].target_current_uA = *setpoints[i];
+			g_adcs_data.mt_pwm_data[i].target_changed = true;
+			LOG_DBG("%s target uA now: %d", axis_names[i], g_adcs_data.mt_pwm_data[i].target_current_uA);
+		}
 	}
 
 	CO_OD_RAM.gyroscope.pitch_rate = g_adcs_data.gyro_data.x;
@@ -310,17 +314,11 @@ static void handle_can_open_data(void)
 
 static void process_can_open_targets(adcs_data_t *data)
 {
-	if (data->mt_pwm_data[0].target_changed) {
-		data->mt_pwm_data[0].target_changed = false;
-		data->mt_pwm_data[0].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_x_setpoint, 0);
-	}
-	if (data->mt_pwm_data[1].target_changed) {
-		data->mt_pwm_data[1].target_changed = false;
-		data->mt_pwm_data[1].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_y_setpoint, 1);
-	}
-	if (data->mt_pwm_data[2].target_changed) {
-		data->mt_pwm_data[2].target_changed = false;
-		data->mt_pwm_data[2].goal_pwm_percent = calc_pwm_from_uA_setpoint(CO_OD_RAM.magnetorquer.current_z_setpoint, 2);
+	for (int i = 0; i < 3; i++) {
+		if (data->mt_pwm_data[i].target_changed) {
+			data->mt_pwm_data[i].target_changed = false;
+			data->mt_pwm_data[i].goal_pwm_percent = calc_pwm_from_uA_setpoint(*setpoints[i], i);
+		}
 	}
 }
 
@@ -719,6 +717,7 @@ typedef enum test_modes {
 	TM_ADC,
 	TM_CURRENT,
 	TM_LOOP,
+	TM_LOOP_RAMP,
 	TM_MODE_COUNT // number of possible modes
 } test_modes;
 
@@ -731,10 +730,33 @@ static test_mode_info tm_info[] = {
 	{"TM_OFF", "only shell"},
 	{"TM_ADC", "read and display ADC sense channels"},
 	{"TM_CURRENT", "read and display current sense measurements"},
-	{"TM_LOOP", "run mt control loop"}
+	{"TM_LOOP", "run mt control loop"},
+	{"TM_LOOP_RAMP", "run mt control loop while ramping target"}
 };
 
 static test_modes mt_test_mode;
+
+typedef struct {
+	uint32_t step_ms;
+	uint32_t step_ua;
+	uint32_t start_ua;
+	uint32_t stop_ua;
+	int axis;
+} mt_ramp;
+
+static mt_ramp mt_ramp_info = {
+	.step_ms = 1000,
+	.step_ua = 10000,
+	.start_ua = 0,
+	.stop_ua = 500000
+};
+
+static void reset_ramp_mode(void)
+{
+	*setpoints[mt_ramp_info.axis] = 0;
+	g_adcs_data.mt_pwm_data[mt_ramp_info.axis].goal_pwm_percent = 0;
+	set_pwm_output(g_adcs_data.mt_pwm_data);
+}
 
 // test code
 static int handle_magnetorquer(void *p1, void *p2, void *p3)
@@ -745,7 +767,10 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 	int64_t t_now = t_start;
 	int64_t t_last = t_start;
 	int64_t t_mt_last = t_start;
+	int64_t t_mt_loop = 0;
 	test_modes active_mode = TM_OFF;
+	bool tlr_printed = false;
+	bool print_loop = true;
 
 	k_thread_name_set(magtqr_id, "magtqr_thread");
 
@@ -772,6 +797,13 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 
 		switch (active_mode) {
 		case TM_OFF:
+			if ((mt_test_mode == active_mode) && (t_mt_loop > 0)) {
+				t_mt_loop = 0; // terminate running loop ramp
+				reset_ramp_mode();
+				tlr_printed = false;
+				print_loop = true;
+				LOG_INF("loop ramp terminated");
+			}
 			break;
 		case TM_ADC:
 			err = acquire_adc_readings();
@@ -802,10 +834,38 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 					(double)g_adcs_data.mt_pwm_data[2].feedback_measurement_V,
 					g_adcs_data.mt_pwm_data[2].feedback_measurement_uA / 1000.0);
 			break;
+		case TM_LOOP_RAMP:
+			/*
+			 * Every loop update interval, increment current axis target uA by step size.
+			 * If incremented beyond the limit, start over at 0.
+			 */
+			if (!tlr_printed) {
+				tlr_printed = true;
+				mt_ramp_info.stop_ua = max_i_ua[mt_ramp_info.axis]; // adjust the upper bounds per axis
+				LOG_INF("x pwm, x targ uA, x fb uA, y pwm, y targ uA, y fb uA, z pwm, z targ uA, z fb uA");
+			}
+			if ((t_now - t_mt_loop) > mt_ramp_info.step_ms) {
+				t_mt_loop = t_now;
+				*setpoints[mt_ramp_info.axis] += mt_ramp_info.step_ua;
+				if (*setpoints[mt_ramp_info.axis] > mt_ramp_info.stop_ua) {
+					*setpoints[mt_ramp_info.axis] = mt_ramp_info.start_ua;
+				}
+				print_loop = true;
+			} else {
+				print_loop = false;
+			}
+			// fall through
 		case TM_LOOP:
 			err = get_current_readings(g_adcs_data.mt_pwm_data);
 			if (err) {
 				LOG_WRN("One or more ADC channels read in error: %d", err);
+			}
+			if (print_loop) {
+				LOG_INF("%d, %d, %d, %d, %d, %d, %d, %d, %d",
+						g_adcs_data.mt_pwm_data[0].active_pwm_percent, g_adcs_data.mt_pwm_data[0].target_current_uA / 1000, g_adcs_data.mt_pwm_data[0].feedback_measurement_uA / 1000,
+						g_adcs_data.mt_pwm_data[1].active_pwm_percent, g_adcs_data.mt_pwm_data[1].target_current_uA / 1000, g_adcs_data.mt_pwm_data[1].feedback_measurement_uA / 1000,
+						g_adcs_data.mt_pwm_data[2].active_pwm_percent, g_adcs_data.mt_pwm_data[2].target_current_uA / 1000, g_adcs_data.mt_pwm_data[2].feedback_measurement_uA / 1000
+						);
 			}
 
 			process_can_open_targets(&g_adcs_data);
@@ -975,6 +1035,7 @@ static int cmd_ua2pwm(const struct shell *sh, size_t argc, char **argv)
 static int cmd_mtmode(const struct shell *sh, size_t argc, char **argv)
 {
 	int i;
+	char c;
 
 	if (argc < 2) {
 		shell_print(sh, "Current mt mode: %d (%s: %s)",
@@ -984,11 +1045,17 @@ static int cmd_mtmode(const struct shell *sh, size_t argc, char **argv)
 		return 0;
 	}
 
-	if ((argv[1][0] == '-') && (argv[1][1] == 'h')) {
-		for (i = 0; i < TM_MODE_COUNT; i++) {
-			shell_print(sh, "Mode %d: %s: %s", i, tm_info[i].name, tm_info[i].desc);
+	while ((c = getopt(argc, argv, "h")) != -1) {
+		switch (c) {
+		case 'h':
+			for (i = 0; i < TM_MODE_COUNT; i++) {
+				shell_print(sh, "Mode %d: %s: %s", i, tm_info[i].name, tm_info[i].desc);
+			}
+			return 0;
+		default:
+			break;
 		}
-		return 0;
+		break;
 	}
 
 	const char *sel_mode = argv[1];
@@ -1002,6 +1069,7 @@ static int cmd_mtmode(const struct shell *sh, size_t argc, char **argv)
 	}
 	if (i >= TM_MODE_COUNT) {
 		int mode = atoi(sel_mode);
+		LOG_DBG("Mode not found by name: %s; using atoi: %d", sel_mode, mode);
 
 		if ((mode >= 0) && (mode < TM_MODE_COUNT)) {
 			mt_test_mode = (test_modes)mode;
@@ -1012,13 +1080,22 @@ static int cmd_mtmode(const struct shell *sh, size_t argc, char **argv)
 	}
 	shell_print(sh, "Selected mode: %s: %s", tm_info[mt_test_mode].name, tm_info[mt_test_mode].desc);
 
+	if (argc > 2) {
+		reset_ramp_mode();
+		int axis = atoi(argv[2]);
+		if ((axis >= 0) && (axis < 3)) {
+			mt_ramp_info.axis = axis;
+			LOG_INF("Set ramp to use axis %d", axis);
+		}
+	}
+
 	return 0;
 }
 
 SHELL_CMD_ARG_REGISTER(mtpwm, NULL,  "mtpwm  [<axis>] [<new duty cycle value>]", cmd_mtpwm, 1, 2);
 SHELL_CMD_ARG_REGISTER(frqpwm, NULL, "frqpwm [<axis>] [<new frequency in Hz>]", cmd_frqpwm, 1, 2);
 SHELL_CMD_ARG_REGISTER(ua2pwm, NULL, "ua2pwm [<axis>] [<target current in uA>]", cmd_ua2pwm, 3, 1);
-SHELL_CMD_ARG_REGISTER(mtmode, NULL, "mtmode [<num>] | [-h]", cmd_mtmode, 1, 1);
+SHELL_CMD_ARG_REGISTER(mtmode, NULL, "mtmode [<num>] [<axis>] | [-h]", cmd_mtmode, 1, 2);
 #endif
 
 #else // not CONFIG_MAGNETORQUER_EXPLORE (normal mode)
