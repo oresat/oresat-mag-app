@@ -71,11 +71,10 @@ config MAGNETORQUERS
 	help
 	  Enable the driving the magnetorquers from CAN requests.
 
-	if MAGNETORQUERS
+	if MAGNETORQUERS && SHELL
 
 	   config MAGNETORQUER_EXPLORE
 		   bool "Enable interaction with target_uA or PWM while monitoring current."
-		   depends on SHELL
 		   help
 			 If The shell is also enabled, provide interactive means to experiment
 			 with various target currents or pwm output, while onboard ADC

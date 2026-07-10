@@ -32,7 +32,8 @@ int32_t update_windowed_average(wnd_avg_store *wasp, int32_t new_datum)
 
 	int32_t sum = 0;
 #if EXTRA_VERBOSE
-	static char line[1024];
+	static char line[1024]; // This is an expeditious value but not optimized in any way.
+							// EXTRA_VERBOSE is only for initial debug and can be removed soon.
 	size_t len = 0;
 #endif
 
