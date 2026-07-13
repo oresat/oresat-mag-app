@@ -256,6 +256,7 @@ static void handle_can_open_data(void)
 		}
 	}
 
+	// Pitch should be the satellite x axis, yaw should be the satellite y axis, roll should be the satellite z axis.
 	CO_OD_RAM.gyroscope.pitch_rate = g_adcs_data.gyro_data.x;
 	CO_OD_RAM.gyroscope.yaw_rate = g_adcs_data.gyro_data.y;
 	CO_OD_RAM.gyroscope.roll_rate = g_adcs_data.gyro_data.z;
@@ -372,7 +373,7 @@ static void print_debug_output(void) {
 		LOG_DBG( "  CO_OD_RAM.magnetorquer_current.y = %d", CO_OD_RAM.magnetorquer.current_y);
 		LOG_DBG( "  CO_OD_RAM.magnetorquer_current.z = %d", CO_OD_RAM.magnetorquer.current_z);
 
-#if 0 // current hardware does not support the +Z magnetometers
+#if 1 // current hardware does not support the +Z magnetometers
 		LOG_DBG( "  CO_OD_RAM.pos_z_magnetometer_1.x = %d", CO_OD_RAM.pos_z_magnetometer_1.x);
 		LOG_DBG( "  CO_OD_RAM.pos_z_magnetometer_1.y = %d", CO_OD_RAM.pos_z_magnetometer_1.y);
 		LOG_DBG( "  CO_OD_RAM.pos_z_magnetometer_1.z = %d", CO_OD_RAM.pos_z_magnetometer_1.z);
@@ -527,9 +528,9 @@ static int get_gyro_readings(three_axis_data *axes, int16_t *temp_data)
 	// sensor +x is satellite +y
 	// sensor -y is satellite +x
 	// sensor +z is satellite +z
-	axes[0].x = -gy;
-	axes[1].y = gx;
-	axes[2].z = gz;
+	axes->x = -gy;
+	axes->y = gx;
+	axes->z = gz;
 
 	return 0;
 }
