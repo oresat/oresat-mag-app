@@ -121,12 +121,12 @@ typedef struct {
 } mt_pwm_phase_data_t;
 
 typedef struct {
-	int16_t x;
-	int16_t y;
-	int16_t z;
-	int16_t x_raw;
-	int16_t y_raw;
-	int16_t z_raw;
+	int32_t x;
+	int32_t y;
+	int32_t z;
+	int32_t x_raw;
+	int32_t y_raw;
+	int32_t z_raw;
 } three_axis_data;
 
 typedef struct  {
@@ -172,7 +172,6 @@ static const struct gpio_dt_spec mt_y_phase = GPIO_DT_SPEC_GET(BP_NODE, mt_y_pha
 static const struct gpio_dt_spec mt_z_phase = GPIO_DT_SPEC_GET(BP_NODE, mt_z_phase_gpios);
 
 static int32_t control_current(const int32_t target_uA, int axis);
-static int16_t raw_to_milligauss(int16_t raw);
 
 /**************************************************/
 
@@ -282,9 +281,9 @@ static void handle_can_open_data(void)
 	CO_OD_RAM.magnetorquer.pwm_z = g_adcs_data.mt_pwm_data[2].active_pwm_percent;
 
 	if (1) { // g_adcs_data.magetometer_data[EC_MAG_2_PZ_1].is_working) {
-		CO_OD_RAM.pos_z_magnetometer_1.x = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_2_PZ_1].x);
-		CO_OD_RAM.pos_z_magnetometer_1.y = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_2_PZ_1].y);
-		CO_OD_RAM.pos_z_magnetometer_1.z = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_2_PZ_1].z);
+		CO_OD_RAM.pos_z_magnetometer_1.x = g_adcs_data.magnetometer_data[EC_MAG_2_PZ_1].x;
+		CO_OD_RAM.pos_z_magnetometer_1.y = g_adcs_data.magnetometer_data[EC_MAG_2_PZ_1].y;
+		CO_OD_RAM.pos_z_magnetometer_1.z = g_adcs_data.magnetometer_data[EC_MAG_2_PZ_1].z;
 	} else {
 		CO_OD_RAM.pos_z_magnetometer_1.x = INT16_MAX;
 		CO_OD_RAM.pos_z_magnetometer_1.y = INT16_MAX;
@@ -292,9 +291,9 @@ static void handle_can_open_data(void)
 	}
 
 	if (1) { // g_adcs_data.magetometer_data[EC_MAG_3_PZ_2].is_working) {
-		CO_OD_RAM.pos_z_magnetometer_2.x = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_3_PZ_2].x);
-		CO_OD_RAM.pos_z_magnetometer_2.y = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_3_PZ_2].y);
-		CO_OD_RAM.pos_z_magnetometer_2.z = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_3_PZ_2].z);
+		CO_OD_RAM.pos_z_magnetometer_2.x = g_adcs_data.magnetometer_data[EC_MAG_3_PZ_2].x;
+		CO_OD_RAM.pos_z_magnetometer_2.y = g_adcs_data.magnetometer_data[EC_MAG_3_PZ_2].y;
+		CO_OD_RAM.pos_z_magnetometer_2.z = g_adcs_data.magnetometer_data[EC_MAG_3_PZ_2].z;
 	} else {
 		CO_OD_RAM.pos_z_magnetometer_2.x = INT16_MAX;
 		CO_OD_RAM.pos_z_magnetometer_2.y = INT16_MAX;
@@ -302,9 +301,9 @@ static void handle_can_open_data(void)
 	}
 
 	if (1) { // g_adcs_data.magetometer_data[EC_MAG_0_MZ_1].is_working) {
-		CO_OD_RAM.min_z_magnetometer_1.x = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_0_MZ_1].x);
-		CO_OD_RAM.min_z_magnetometer_1.y = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_0_MZ_1].y);
-		CO_OD_RAM.min_z_magnetometer_1.z = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_0_MZ_1].z);
+		CO_OD_RAM.min_z_magnetometer_1.x = g_adcs_data.magnetometer_data[EC_MAG_0_MZ_1].x;
+		CO_OD_RAM.min_z_magnetometer_1.y = g_adcs_data.magnetometer_data[EC_MAG_0_MZ_1].y;
+		CO_OD_RAM.min_z_magnetometer_1.z = g_adcs_data.magnetometer_data[EC_MAG_0_MZ_1].z;
 	} else {
 		CO_OD_RAM.min_z_magnetometer_1.x = INT16_MAX;
 		CO_OD_RAM.min_z_magnetometer_1.y = INT16_MAX;
@@ -312,9 +311,9 @@ static void handle_can_open_data(void)
 	}
 
 	if (1) { // g_adcs_data.magetometer_data[EC_MAG_1_MZ_2].is_working) {
-		CO_OD_RAM.min_z_magnetometer_2.x = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_1_MZ_2].x);
-		CO_OD_RAM.min_z_magnetometer_2.y = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_1_MZ_2].y);
-		CO_OD_RAM.min_z_magnetometer_2.z = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_1_MZ_2].z);
+		CO_OD_RAM.min_z_magnetometer_2.x = g_adcs_data.magnetometer_data[EC_MAG_1_MZ_2].x;
+		CO_OD_RAM.min_z_magnetometer_2.y = g_adcs_data.magnetometer_data[EC_MAG_1_MZ_2].y;
+		CO_OD_RAM.min_z_magnetometer_2.z = g_adcs_data.magnetometer_data[EC_MAG_1_MZ_2].z;
 	} else {
 		CO_OD_RAM.min_z_magnetometer_2.x = INT16_MAX;
 		CO_OD_RAM.min_z_magnetometer_2.y = INT16_MAX;
@@ -485,12 +484,6 @@ static int32_t control_current(const int32_t target_uA, int axis)
 	return(pwm);
 }
 
-static int16_t raw_to_milligauss(int16_t raw)
-{
-		float gauss = 1000.0f * ((float) raw) / 4096.0f;
-		return (int16_t)gauss;
-}
-
 static int get_mag_readings(three_axis_data *axes)
 {
 	int i;
@@ -498,7 +491,7 @@ static int get_mag_readings(three_axis_data *axes)
 
 	for (i = 0; i < NUM_MAGS; i++) {
 		int ret = get_mag_reading(i,
-								  &axes[i].x,
+								  &axes[i].x, // get reading in milligauss
 								  &axes[i].y,
 								  &axes[i].z);
 		if (ret) {

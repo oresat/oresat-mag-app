@@ -225,13 +225,29 @@ int init_mag(void)
 	return ret;
 }
 
-int get_mag_reading(int mag_num, int16_t *x, int16_t *y, int16_t *z)
+int get_mag_reading(int mag_num, int32_t *x, int32_t *y, int32_t *z)
 {
 	if (mag_num >= NUM_MAGS) {
 		return -EINVAL; // we don't support that one yet
 	}
+	/*
+	The 32 bit value is shifted by the shift amount, but what that means in
+	practical terms is hard to figure out. See:
+	zephyr/drivers/sensor/pni/rm3100/rm3100_decoder.c line 116 (rm3100_convert_raw_to_q31)
+	with the ODR value set in mcxn947_mag_card_mcxn947_cpu0.dtsi, which sets odr to 300 Hz.
+	This means the decoder fn above uses shift = 11 and divider = 75 (uT per LSB).
+	Further, the decoder scales the data (micro_tesla_scaled) then divides by 100
+	to get gauss_scaled, which is the raw output value.
+	To extract the integer portion in gauss, Zephyr samples such as 
+	zephyr/sensors/sample/stream_fifo/src/main.c use a series of macros:
+	PRIsensor_q31_data_arg() from zephyr/include/zephyr/drivers/sensor_data_types.h, which then
+	uses macros from zephyr/include/zephyr/dsp/print_format.h: PRIq_arg() etc.
 
-	// TODO: check if the range returned from the driver can go above 16 bits
+	What we want is to convert the reading to milligauss.
+	*/
+	int8_t shift = mag_data[mag_num].shift;
+	// TODO: use shift somehow
+
 	*x = (int16_t)mag_data[mag_num].readings[0].x;
 	*y = (int16_t)mag_data[mag_num].readings[0].y;
 	*z = (int16_t)mag_data[mag_num].readings[0].z;

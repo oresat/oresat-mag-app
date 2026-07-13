@@ -95,14 +95,14 @@
 	rm3100a: rm3100@20 {
 			compatible = "pni,rm3100";
 			reg = <0x20>;
-			odr = <RM3100_DT_ODR_600>;
+			odr = <RM3100_DT_ODR_300>;
 			status = "okay";
 			zephyr,deferred-init;
 	};
 	rm3100b: rm3100@22 {
 			compatible = "pni,rm3100";
 			reg = <0x22>;
-			odr = <RM3100_DT_ODR_600>;
+			odr = <RM3100_DT_ODR_300>;
 			status = "okay";
 			zephyr,deferred-init;
 	};
