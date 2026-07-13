@@ -121,12 +121,12 @@ typedef struct {
 } mt_pwm_phase_data_t;
 
 typedef struct {
-	int16_t x;
-	int16_t y;
-	int16_t z;
-	int16_t x_raw;
-	int16_t y_raw;
-	int16_t z_raw;
+	int32_t x;
+	int32_t y;
+	int32_t z;
+	int32_t x_raw;
+	int32_t y_raw;
+	int32_t z_raw;
 } three_axis_data;
 
 typedef struct  {
@@ -153,14 +153,6 @@ static char *axis_names[] = {
 	"X", "Y", "Z"
 };
 
-typedef enum {
-	EC_MAG_0_MZ_1 = 0,
-	EC_MAG_1_MZ_2,
-	EC_MAG_2_PZ_1,
-	EC_MAG_3_PZ_2,
-	EC_MAG_NONE,
-} end_card_magnetometer_t;
-
 /* === GPIO data === */
 #define BP_NODE DT_NODELABEL(maggpios)
 
@@ -172,7 +164,6 @@ static const struct gpio_dt_spec mt_y_phase = GPIO_DT_SPEC_GET(BP_NODE, mt_y_pha
 static const struct gpio_dt_spec mt_z_phase = GPIO_DT_SPEC_GET(BP_NODE, mt_z_phase_gpios);
 
 static int32_t control_current(const int32_t target_uA, int axis);
-static int16_t raw_to_milligauss(int16_t raw);
 
 /**************************************************/
 
@@ -257,6 +248,7 @@ static void handle_can_open_data(void)
 		}
 	}
 
+	// Pitch should be the satellite x axis, yaw should be the satellite y axis, roll should be the satellite z axis.
 	CO_OD_RAM.gyroscope.pitch_rate = g_adcs_data.gyro_data.x;
 	CO_OD_RAM.gyroscope.yaw_rate = g_adcs_data.gyro_data.y;
 	CO_OD_RAM.gyroscope.roll_rate = g_adcs_data.gyro_data.z;
@@ -282,9 +274,9 @@ static void handle_can_open_data(void)
 	CO_OD_RAM.magnetorquer.pwm_z = g_adcs_data.mt_pwm_data[2].active_pwm_percent;
 
 	if (1) { // g_adcs_data.magetometer_data[EC_MAG_2_PZ_1].is_working) {
-		CO_OD_RAM.pos_z_magnetometer_1.x = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_2_PZ_1].x);
-		CO_OD_RAM.pos_z_magnetometer_1.y = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_2_PZ_1].y);
-		CO_OD_RAM.pos_z_magnetometer_1.z = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_2_PZ_1].z);
+		CO_OD_RAM.pos_z_magnetometer_1.x = g_adcs_data.magnetometer_data[EC_MAG_0_PZ_1].x;
+		CO_OD_RAM.pos_z_magnetometer_1.y = g_adcs_data.magnetometer_data[EC_MAG_0_PZ_1].y;
+		CO_OD_RAM.pos_z_magnetometer_1.z = g_adcs_data.magnetometer_data[EC_MAG_0_PZ_1].z;
 	} else {
 		CO_OD_RAM.pos_z_magnetometer_1.x = INT16_MAX;
 		CO_OD_RAM.pos_z_magnetometer_1.y = INT16_MAX;
@@ -292,9 +284,9 @@ static void handle_can_open_data(void)
 	}
 
 	if (1) { // g_adcs_data.magetometer_data[EC_MAG_3_PZ_2].is_working) {
-		CO_OD_RAM.pos_z_magnetometer_2.x = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_3_PZ_2].x);
-		CO_OD_RAM.pos_z_magnetometer_2.y = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_3_PZ_2].y);
-		CO_OD_RAM.pos_z_magnetometer_2.z = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_3_PZ_2].z);
+		CO_OD_RAM.pos_z_magnetometer_2.x = g_adcs_data.magnetometer_data[EC_MAG_1_PZ_2].x;
+		CO_OD_RAM.pos_z_magnetometer_2.y = g_adcs_data.magnetometer_data[EC_MAG_1_PZ_2].y;
+		CO_OD_RAM.pos_z_magnetometer_2.z = g_adcs_data.magnetometer_data[EC_MAG_1_PZ_2].z;
 	} else {
 		CO_OD_RAM.pos_z_magnetometer_2.x = INT16_MAX;
 		CO_OD_RAM.pos_z_magnetometer_2.y = INT16_MAX;
@@ -302,9 +294,9 @@ static void handle_can_open_data(void)
 	}
 
 	if (1) { // g_adcs_data.magetometer_data[EC_MAG_0_MZ_1].is_working) {
-		CO_OD_RAM.min_z_magnetometer_1.x = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_0_MZ_1].x);
-		CO_OD_RAM.min_z_magnetometer_1.y = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_0_MZ_1].y);
-		CO_OD_RAM.min_z_magnetometer_1.z = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_0_MZ_1].z);
+		CO_OD_RAM.min_z_magnetometer_1.x = g_adcs_data.magnetometer_data[EC_MAG_2_MZ_1].x;
+		CO_OD_RAM.min_z_magnetometer_1.y = g_adcs_data.magnetometer_data[EC_MAG_2_MZ_1].y;
+		CO_OD_RAM.min_z_magnetometer_1.z = g_adcs_data.magnetometer_data[EC_MAG_2_MZ_1].z;
 	} else {
 		CO_OD_RAM.min_z_magnetometer_1.x = INT16_MAX;
 		CO_OD_RAM.min_z_magnetometer_1.y = INT16_MAX;
@@ -312,9 +304,9 @@ static void handle_can_open_data(void)
 	}
 
 	if (1) { // g_adcs_data.magetometer_data[EC_MAG_1_MZ_2].is_working) {
-		CO_OD_RAM.min_z_magnetometer_2.x = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_1_MZ_2].x);
-		CO_OD_RAM.min_z_magnetometer_2.y = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_1_MZ_2].y);
-		CO_OD_RAM.min_z_magnetometer_2.z = raw_to_milligauss(g_adcs_data.magnetometer_data[EC_MAG_1_MZ_2].z);
+		CO_OD_RAM.min_z_magnetometer_2.x = g_adcs_data.magnetometer_data[EC_MAG_3_MZ_2].x;
+		CO_OD_RAM.min_z_magnetometer_2.y = g_adcs_data.magnetometer_data[EC_MAG_3_MZ_2].y;
+		CO_OD_RAM.min_z_magnetometer_2.z = g_adcs_data.magnetometer_data[EC_MAG_3_MZ_2].z;
 	} else {
 		CO_OD_RAM.min_z_magnetometer_2.x = INT16_MAX;
 		CO_OD_RAM.min_z_magnetometer_2.y = INT16_MAX;
@@ -373,7 +365,7 @@ static void print_debug_output(void) {
 		LOG_DBG( "  CO_OD_RAM.magnetorquer_current.y = %d", CO_OD_RAM.magnetorquer.current_y);
 		LOG_DBG( "  CO_OD_RAM.magnetorquer_current.z = %d", CO_OD_RAM.magnetorquer.current_z);
 
-#if 0 // current hardware does not support the +Z magnetometers
+#if 1 // current hardware does not support the +Z magnetometers
 		LOG_DBG( "  CO_OD_RAM.pos_z_magnetometer_1.x = %d", CO_OD_RAM.pos_z_magnetometer_1.x);
 		LOG_DBG( "  CO_OD_RAM.pos_z_magnetometer_1.y = %d", CO_OD_RAM.pos_z_magnetometer_1.y);
 		LOG_DBG( "  CO_OD_RAM.pos_z_magnetometer_1.z = %d", CO_OD_RAM.pos_z_magnetometer_1.z);
@@ -430,6 +422,8 @@ static float saturate_float(const float v, const float min, const float max) {
  */
 static int32_t control_current(const int32_t target_uA, int axis)
 {
+	static int print_count = 20;
+	int sign;
 	int32_t pwm = 0;
 	int32_t goal_uA;
 	int32_t actual_uA;
@@ -473,22 +467,21 @@ static int32_t control_current(const int32_t target_uA, int axis)
 	out = ff + p + i;
 
 	// convert output to pwm duty cycle based on quadratic relationship between pwm and current in this system
-	pwm = (int32_t)(sqrt((double)out / max_uA) * max_duty);
+	sign = out < 0 ? -1 : 1;
+
+	pwm = (int32_t)(sqrt((double)fabs(out) / max_uA) * max_duty) * sign;
 	pwm = saturate_int32_t(pwm, -max_duty, max_duty);
 
 	data->integral = i;
 	data->error = error;
 
-	LOG_DBG("Axis:%d, target_mA:%.3f, goal_mA:%.3f, actual_mA:%.3f, max_pwm:%d, max_i_ua:%d, ff:%.3f, error:%d, p:%.3f, i:%.3f, pwm:%d",
-			axis, target_uA / 1000.0, goal_uA / 1000.0, actual_uA / 1000.0, max_duty, max_uA,
-			(double)ff, error, (double)p, (double)i, pwm);
+	if (--print_count <= 0) {
+		print_count = 20;
+		LOG_DBG("Axis:%d, target_mA:%.3f, goal_mA:%.3f, actual_mA:%.3f, max_pwm:%d, max_i_ua:%d, ff:%.3f, error:%d, p:%.3f, i:%.3f, pwm:%d",
+				axis, target_uA / 1000.0, goal_uA / 1000.0, actual_uA / 1000.0, max_duty, max_uA,
+				(double)ff, error, (double)p, (double)i, pwm);
+	}
 	return(pwm);
-}
-
-static int16_t raw_to_milligauss(int16_t raw)
-{
-		float gauss = 1000.0f * ((float) raw) / 4096.0f;
-		return (int16_t)gauss;
 }
 
 static int get_mag_readings(three_axis_data *axes)
@@ -498,7 +491,7 @@ static int get_mag_readings(three_axis_data *axes)
 
 	for (i = 0; i < NUM_MAGS; i++) {
 		int ret = get_mag_reading(i,
-								  &axes[i].x,
+								  &axes[i].x, // get reading in milligauss
 								  &axes[i].y,
 								  &axes[i].z);
 		if (ret) {
@@ -515,7 +508,7 @@ static int get_gyro_readings(three_axis_data *axes, int16_t *temp_data)
 	int16_t gy;
 	int16_t gz;
 
-	// x, y, and z are in units of: (for GYRO_FS_SEL = 7) 2097.2LSB/(º/s)
+	// gx/y/z are in milli-degrees/second
 	// temp is in units of decicentigrade (degrees C times 10)
 	get_gyro_data(&gx,
 				  &gy,
@@ -527,9 +520,9 @@ static int get_gyro_readings(three_axis_data *axes, int16_t *temp_data)
 	// sensor +x is satellite +y
 	// sensor -y is satellite +x
 	// sensor +z is satellite +z
-	axes[0].x = -gy;
-	axes[1].y = gx;
-	axes[2].z = gz;
+	axes->x = -gy;
+	axes->y = gx;
+	axes->z = gz;
 
 	return 0;
 }
@@ -629,7 +622,7 @@ static int set_pwm_output(mt_pwm_phase_data_t *axes)
 
 		// Updates will come in periodically via CANOpen, this will apply those updates to the PWM outputs.
 		if( axes[i].active_pwm_percent != axes[i].goal_pwm_percent ) {
-			LOG_DBG("goal_pwm_percent = %d", axes[i].goal_pwm_percent);
+			//LOG_DBG("goal_pwm_percent = %d", axes[i].goal_pwm_percent);
 
 			if (axes[i].goal_pwm_percent < 0) {
 				new_state = true;
