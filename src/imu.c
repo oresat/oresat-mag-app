@@ -67,7 +67,8 @@ LOG_MODULE_REGISTER(imu, CONFIG_SENSOR_LOG_LEVEL);
 // 15.625 degrees / second full scale range
 #define GYRO_FULL_SCALE_RANGE_BIT BIT_GYRO_UI_FS_15_625
 // in units of LSB / (degree/s) == (32767 / 15.625) = 2097 counts / degree / second
-#define GYRO_OUT_SCALE (32767 / 15.625f)
+#define RAW_GYRO_OUT_SCALE (32767 / 15.625f)
+#define GYRO_UNIT_SCALE 1000.0f // milli-degrees/second
 
 static const struct device *i2c;
 static uint8_t imu_addr;
@@ -539,9 +540,9 @@ static int process_data(int16_t *x, int16_t *y, int16_t *z, int16_t *temp)
 
 void get_gyro_data(int16_t *x, int16_t *y, int16_t *z, int16_t *temp)
 {
-	*x = (int16_t)(gx / GYRO_OUT_SCALE);  // convert to degrees / second (we lose a lot of resolution; mDPS might be better)
-	*y = (int16_t)(gy / GYRO_OUT_SCALE);
-	*z = (int16_t)(gz / GYRO_OUT_SCALE);
+	*x = (int16_t)(GYRO_UNIT_SCALE * gx / RAW_GYRO_OUT_SCALE);  // convert to 0.001 degrees / second (milli-degrees per second)
+	*y = (int16_t)(GYRO_UNIT_SCALE * gy / RAW_GYRO_OUT_SCALE);
+	*z = (int16_t)(GYRO_UNIT_SCALE * gz / RAW_GYRO_OUT_SCALE);
 	*temp = gtemp;
 }
 
