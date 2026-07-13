@@ -429,6 +429,8 @@ static float saturate_float(const float v, const float min, const float max) {
  */
 static int32_t control_current(const int32_t target_uA, int axis)
 {
+	static int print_count = 20;
+	int sign;
 	int32_t pwm = 0;
 	int32_t goal_uA;
 	int32_t actual_uA;
@@ -472,15 +474,20 @@ static int32_t control_current(const int32_t target_uA, int axis)
 	out = ff + p + i;
 
 	// convert output to pwm duty cycle based on quadratic relationship between pwm and current in this system
-	pwm = (int32_t)(sqrt((double)out / max_uA) * max_duty);
+	sign = out < 0 ? -1 : 1;
+
+	pwm = (int32_t)(sqrt((double)fabs(out) / max_uA) * max_duty) * sign;
 	pwm = saturate_int32_t(pwm, -max_duty, max_duty);
 
 	data->integral = i;
 	data->error = error;
 
-	LOG_DBG("Axis:%d, target_mA:%.3f, goal_mA:%.3f, actual_mA:%.3f, max_pwm:%d, max_i_ua:%d, ff:%.3f, error:%d, p:%.3f, i:%.3f, pwm:%d",
-			axis, target_uA / 1000.0, goal_uA / 1000.0, actual_uA / 1000.0, max_duty, max_uA,
-			(double)ff, error, (double)p, (double)i, pwm);
+	if (--print_count <= 0) {
+		print_count = 20;
+		LOG_DBG("Axis:%d, target_mA:%.3f, goal_mA:%.3f, actual_mA:%.3f, max_pwm:%d, max_i_ua:%d, ff:%.3f, error:%d, p:%.3f, i:%.3f, pwm:%d",
+				axis, target_uA / 1000.0, goal_uA / 1000.0, actual_uA / 1000.0, max_duty, max_uA,
+				(double)ff, error, (double)p, (double)i, pwm);
+	}
 	return(pwm);
 }
 
@@ -622,7 +629,7 @@ static int set_pwm_output(mt_pwm_phase_data_t *axes)
 
 		// Updates will come in periodically via CANOpen, this will apply those updates to the PWM outputs.
 		if( axes[i].active_pwm_percent != axes[i].goal_pwm_percent ) {
-			LOG_DBG("goal_pwm_percent = %d", axes[i].goal_pwm_percent);
+			//LOG_DBG("goal_pwm_percent = %d", axes[i].goal_pwm_percent);
 
 			if (axes[i].goal_pwm_percent < 0) {
 				new_state = true;

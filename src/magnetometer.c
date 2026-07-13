@@ -46,6 +46,11 @@ LOG_MODULE_REGISTER(magnetometer, CONFIG_SENSOR_LOG_LEVEL);
 /* === GPIO data === */
 #define BP_NODE DT_NODELABEL(maggpios)
 
+// Copied from zephyr/dsp/utils.h (you end up needing to pull in a bunch of DSP stuff, including a library,
+// simply to access this macro, which is overkill.
+// Removed the "Z_" prefix t prevent conflicts in the future.
+#define SHIFT_Q31_TO_F32(src, m) ((float32_t)(((int64_t)src) << m) / (float32_t)(1U << 31))
+
 static const struct gpio_dt_spec n_mag_en = GPIO_DT_SPEC_GET(BP_NODE, n_mag_en_gpios);
 static const struct gpio_dt_spec n_mag_fault = GPIO_DT_SPEC_GET(BP_NODE, n_mag_fault_gpios);
 static const struct gpio_dt_spec mag_ready = GPIO_DT_SPEC_GET(BP_NODE, mag_ready_gpios);
@@ -245,12 +250,10 @@ int get_mag_reading(int mag_num, int32_t *x, int32_t *y, int32_t *z)
 
 	What we want is to convert the reading to milligauss.
 	*/
-	int8_t shift = mag_data[mag_num].shift;
-	// TODO: use shift somehow
 
-	*x = (int16_t)mag_data[mag_num].readings[0].x;
-	*y = (int16_t)mag_data[mag_num].readings[0].y;
-	*z = (int16_t)mag_data[mag_num].readings[0].z;
+	*x = (int32_t)(SHIFT_Q31_TO_F32(mag_data[mag_num].readings[0].x, mag_data[0].shift) * 1000.0f);
+	*y = (int32_t)(SHIFT_Q31_TO_F32(mag_data[mag_num].readings[0].y, mag_data[0].shift) * 1000.0f);
+	*z = (int32_t)(SHIFT_Q31_TO_F32(mag_data[mag_num].readings[0].z, mag_data[0].shift) * 1000.0f);
 
 	return 0;
 }
