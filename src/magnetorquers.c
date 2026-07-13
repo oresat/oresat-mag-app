@@ -516,7 +516,7 @@ static int get_gyro_readings(three_axis_data *axes, int16_t *temp_data)
 	int16_t gy;
 	int16_t gz;
 
-	// x, y, and z are in units of: (for GYRO_FS_SEL = 7) 2097.2LSB/(º/s)
+	// gx/y/z are in degrees/second
 	// temp is in units of decicentigrade (degrees C times 10)
 	get_gyro_data(&gx,
 				  &gy,

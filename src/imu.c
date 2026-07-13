@@ -64,6 +64,11 @@ LOG_MODULE_REGISTER(imu, CONFIG_SENSOR_LOG_LEVEL);
 #define IMU_ODR 100 // Hz
 #define DEBUG_PRINT_PERIOD  100 // 1s
 
+// 15.625 degrees / second full scale range
+#define GYRO_FULL_SCALE_RANGE_BIT BIT_GYRO_UI_FS_15_625
+// in units of LSB / (degree/s) == (32767 / 15.625) = 2097 counts / degree / second
+#define GYRO_OUT_SCALE (32767 / 15.625f)
+
 static const struct device *i2c;
 static uint8_t imu_addr;
 static uint8_t prev_bank;
@@ -196,7 +201,7 @@ static int reset_imu(void)
 
 	for (attempt = 1; attempt < SOFT_RESET_RETRIES; attempt++) {
 		ret = imu_write_reg(REG_DEVICE_CONFIG, BIT_SOFT_RESET_CONFIG);
-		k_msleep(10); /* must sleep 1ms before any other register access */
+		k_msleep(10 * attempt); /* must sleep > 1 ms before any other register access */
 		if (ret < 0) {
 			LOG_ERR("Attempt %d: error soft resetting IMU: %d", attempt++, ret);
 			continue;
@@ -213,7 +218,7 @@ static int reset_imu(void)
 					break;
 				}
 			}
-			k_msleep(100);
+			k_msleep(50 * (i + 1));
 		}
 		if (!ret) {
 			if ((int_status & BIT_RESET_DONE_INT)) {
@@ -227,14 +232,14 @@ static int reset_imu(void)
 		if (ret) {
 			LOG_WRN("I2C bus is stuck (err: %d); recovery failed", ret);
 		}
-		k_sleep(K_MSEC(10));
+		k_msleep(50 * attempt); // increase the time each loop, just in case that helps recovery
 	}
 
 	if (ret < 0) {
 		if (rec_count < MAX_RECOVERY_BOOTS) {
 			store_recovery_count(rec_count + 1);
 			settings_commit();
-			k_sleep(K_MSEC(500)); // give settings time to be written to flash
+			k_msleep(500); // give settings time to be written to flash
 			__ASSERT(ret < 0, "Giving up on soft reset of IMU. Rebooting.");
 		} else {
 			LOG_ERR("Cannot recover i2c bus after 10 reboot attempts. Giving up.");
@@ -366,7 +371,7 @@ static int configure_imu(void)
 
 	/* Set gyro full scale range and output data rate */
 	ret = imu_write_reg(REG_GYRO_CONFIG0,
-						(BIT_GYRO_UI_FS_15_625 << 5) | BIT_GYRO_ODR_100);
+						(GYRO_FULL_SCALE_RANGE_BIT << 5) | BIT_GYRO_ODR_100);
 	k_msleep(1); /* must sleep > 200 us before any other register access */
 	if (ret < 0) {
 		LOG_ERR("Error setting Gyro Config on IMU: %d", ret);
@@ -534,9 +539,9 @@ static int process_data(int16_t *x, int16_t *y, int16_t *z, int16_t *temp)
 
 void get_gyro_data(int16_t *x, int16_t *y, int16_t *z, int16_t *temp)
 {
-	*x = gx;
-	*y = gy;
-	*z = gz;
+	*x = (int16_t)(gx / GYRO_OUT_SCALE);  // convert to degrees / second (we lose a lot of resolution; mDPS might be better)
+	*y = (int16_t)(gy / GYRO_OUT_SCALE);
+	*z = (int16_t)(gz / GYRO_OUT_SCALE);
 	*temp = gtemp;
 }
 
@@ -546,7 +551,7 @@ static void handle_imu(void *p1, void *p2, void *p3)
 	int rec_count;
 
 	k_thread_name_set(imu_id, "imu_thread");
-	k_sleep(K_MSEC(IMU_STARTUP_DELAY));
+	k_msleep(IMU_STARTUP_DELAY);
 
 	LOG_INF("Starting IMU thread");
 
@@ -583,7 +588,7 @@ static void handle_imu(void *p1, void *p2, void *p3)
 			if (!err && (int_status & BIT_DATA_RDY_INT)) {
 				break;
 			}
-			k_sleep(K_MSEC(1));
+			k_msleep(1);
 		}
 		if (err) {
 			LOG_ERR("Timeout waiting for data ready");
@@ -603,7 +608,7 @@ static void handle_imu(void *p1, void *p2, void *p3)
 				LOG_DBG("Ave temp (dC): %d", temp_decicentigrade);
 			}
 		}
-		k_sleep(K_MSEC(IMU_ITERATION_PERIOD));
+		k_msleep(IMU_ITERATION_PERIOD);
 	}
 }
 
