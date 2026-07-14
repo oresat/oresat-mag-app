@@ -33,6 +33,8 @@ LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_DBG);
 /* scheduling priority used by each thread */
 #define PRIORITY 7
 
+#define HIST_LEN 10								// number of current reading samples to use for running average
+
 #define MAGNETORQUER_STARTUP_DELAY 2000			// roughly when all the helper threads are up; TODO: add interthread signalling for this
 #define ITERATION_PERIOD 5						// ms
 #define DEBUG_PRINT_PERIOD 1500					// ms
@@ -106,6 +108,7 @@ typedef struct {
 
 	int32_t active_pwm_percent;			// 0-10000
 
+	int32_t ofs_mv_buffer[HIST_LEN];	// buffer to store running average in
 	wnd_avg_store ofs_mv_store;			// used to compute running average of a recent set of offset voltages
 	uint32_t ofs_mv;					// compensation for inherent op-amp input voltage offset
 	float feedback_measurement_V;		// Volts, Note: this is the average voltage while the PWM output is high.
@@ -137,11 +140,7 @@ typedef struct  {
 	three_axis_data magnetometer_data[4];
 } adcs_data_t;
 
-static adcs_data_t g_adcs_data = {
-	.mt_pwm_data[0].ofs_mv_store.name = "adcx",
-	.mt_pwm_data[1].ofs_mv_store.name = "adcy",
-	.mt_pwm_data[2].ofs_mv_store.name = "adcz"
-};
+static adcs_data_t g_adcs_data;
 
 static int32_t *setpoints[] = { // make it easy to index by numeric axis
 	&CO_OD_RAM.magnetorquer.current_x_setpoint,
@@ -697,6 +696,13 @@ static int reset_magnetorquer(void)
 
 static int init_magnetorquer(void) {
 	int err;
+
+	init_windowed_average(&g_adcs_data.mt_pwm_data[0].ofs_mv_store,
+						  g_adcs_data.mt_pwm_data[0].ofs_mv_buffer, HIST_LEN, "adcx");
+	init_windowed_average(&g_adcs_data.mt_pwm_data[1].ofs_mv_store,
+						  g_adcs_data.mt_pwm_data[1].ofs_mv_buffer, HIST_LEN, "adcy");
+	init_windowed_average(&g_adcs_data.mt_pwm_data[2].ofs_mv_store,
+						  g_adcs_data.mt_pwm_data[2].ofs_mv_buffer, HIST_LEN, "adcz");
 
 	err = init_gpios();
 	if (err) {
