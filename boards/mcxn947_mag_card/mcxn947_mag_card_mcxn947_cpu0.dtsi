@@ -200,7 +200,7 @@
 };
 
 &edma0 {
-	status = "disabled";
+	status = "okay";
 };
 
 &wwdt0 {
