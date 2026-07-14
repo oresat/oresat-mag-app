@@ -1240,10 +1240,10 @@ static int cmd_mtmode(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
-SHELL_CMD_ARG_REGISTER(mtpwm, NULL,  "mtpwm  [<axis>] [<new duty cycle value>]", cmd_mtpwm, 1, 2);
-SHELL_CMD_ARG_REGISTER(frqpwm, NULL, "frqpwm [<axis>] [<new frequency in Hz>]", cmd_frqpwm, 1, 2);
-SHELL_CMD_ARG_REGISTER(ua2pwm, NULL, "ua2pwm [<axis>] [<target current in uA>]", cmd_ua2pwm, 3, 1);
-SHELL_CMD_ARG_REGISTER(mtmode, NULL, "mtmode [<num>] [<axis>] | [-h]", cmd_mtmode, 1, 2);
+SHELL_CMD_ARG_REGISTER(mtpwm, NULL,  SHELL_HELP("Set/get magnetorquer pwm", "mtpwm  [<axis>] [<new duty cycle value>]"), cmd_mtpwm, 1, 2);
+SHELL_CMD_ARG_REGISTER(frqpwm, NULL, SHELL_HELP("Set/get pwm frequency", "frqpwm [<axis>] [<new frequency in Hz>]"), cmd_frqpwm, 1, 2);
+SHELL_CMD_ARG_REGISTER(ua2pwm, NULL, SHELL_HELP("Set magnetorquer current", "ua2pwm <axis> <target current in uA>"), cmd_ua2pwm, 3, 0);
+SHELL_CMD_ARG_REGISTER(mtmode, NULL, SHELL_HELP("Set/get test mode", "mtmode [<num>] [<axis>]"), cmd_mtmode, 1, 2);
 #endif // CONFIG_MAGNETORQUER_EXPLORE
 
 K_THREAD_DEFINE(magtqr_id, STACK_SIZE, handle_magnetorquer, NULL, NULL, NULL, PRIORITY, 0, 0);
