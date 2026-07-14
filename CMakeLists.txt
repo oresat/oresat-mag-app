@@ -1,12 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-
 cmake_minimum_required(VERSION 3.20.0)
 
 list(APPEND BOARD_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
 set(BOARD "mcxn947_mag_card/mcxn947/cpu0")
-
-find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
-project(oresat_mcxn947_mag)
 
 set(VERSION_MAJOR "1")
 set(VERSION_MINOR "1")
@@ -17,7 +13,7 @@ set(EXTRAVERSION "00000000")
 find_package(Git QUIET REQUIRED)
 
 execute_process(
-    COMMAND "${GIT_EXECUTABLE}" describe --always HEAD
+    COMMAND "${GIT_EXECUTABLE}" rev-parse --short HEAD
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
     RESULT_VARIABLE res
     OUTPUT_VARIABLE EXTRAVERSION
@@ -32,9 +28,14 @@ set_property(GLOBAL APPEND
 # utilize settings to autogenerate a header file to adjust the build inside the C code
 #
 configure_file (
-   "${PROJECT_SOURCE_DIR}/src/VERSION.in"
-   "${PROJECT_SOURCE_DIR}/VERSION"
+   "${CMAKE_SOURCE_DIR}/src/VERSION.in"
+   "${CMAKE_SOURCE_DIR}/VERSION"
    )
+
+find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+
+project(oresat_mcxn947_mag)
+
 include_directories("${PROJECT_SOURCE_DIR}") # needed so c code can find this header
 
 target_sources(app PRIVATE src/main.c src/windowed_average.c)
