@@ -1,22 +1,30 @@
 #ifndef _WINDOWED_AVERAGE_H_
 #define _WINDOWED_AVERAGE_H_
 
-
-// TODO: use macro tricks to allow each user set the history size to whatever they need
-// make so that IMU_ODR * this is equal or longer than magnetorquer update period
-#define NUM_DATA_SAMPLE_PER_AVG 10
-
 typedef struct {
-	char *name;
-	int32_t hist[NUM_DATA_SAMPLE_PER_AVG + 1];
+	const char *name;
+	int32_t *hist_buffer;
+	int32_t hist_buffer_len;
 	int32_t depth;
 } wnd_avg_store;
 
 /**
- * @brief Return windowed average to empty state.
+ * @brief Set up windowed average structure.
  *
  * @param hist_sp   - pointer to wnd_avg_store
+ * @param hist_buffer - caller's array in which the history is
+ * stored.
+ * @param hist_buffer_len - number of int32_t entries.
+ * @param name - optional string to print in logging
+ * @return int - negative error code or 0 on no error.
  */
+int init_windowed_average(wnd_avg_store *store, int32_t *hist_buffer, int32_t hist_buffer_len, const char *name);
+
+/**
+  * @brief Return windowed average to empty state.
+  *
+  * @param hist_sp   - pointer to wnd_avg_store
+  */
 void reset_windowed_average(wnd_avg_store *store);
 
 /**
