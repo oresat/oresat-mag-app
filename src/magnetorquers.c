@@ -153,14 +153,6 @@ static char *axis_names[] = {
 	"X", "Y", "Z"
 };
 
-typedef enum {
-	EC_MAG_0_MZ_1 = 0,
-	EC_MAG_1_MZ_2,
-	EC_MAG_2_PZ_1,
-	EC_MAG_3_PZ_2,
-	EC_MAG_NONE,
-} end_card_magnetometer_t;
-
 /* === GPIO data === */
 #define BP_NODE DT_NODELABEL(maggpios)
 
@@ -282,9 +274,9 @@ static void handle_can_open_data(void)
 	CO_OD_RAM.magnetorquer.pwm_z = g_adcs_data.mt_pwm_data[2].active_pwm_percent;
 
 	if (1) { // g_adcs_data.magetometer_data[EC_MAG_2_PZ_1].is_working) {
-		CO_OD_RAM.pos_z_magnetometer_1.x = g_adcs_data.magnetometer_data[EC_MAG_2_PZ_1].x;
-		CO_OD_RAM.pos_z_magnetometer_1.y = g_adcs_data.magnetometer_data[EC_MAG_2_PZ_1].y;
-		CO_OD_RAM.pos_z_magnetometer_1.z = g_adcs_data.magnetometer_data[EC_MAG_2_PZ_1].z;
+		CO_OD_RAM.pos_z_magnetometer_1.x = g_adcs_data.magnetometer_data[EC_MAG_0_PZ_1].x;
+		CO_OD_RAM.pos_z_magnetometer_1.y = g_adcs_data.magnetometer_data[EC_MAG_0_PZ_1].y;
+		CO_OD_RAM.pos_z_magnetometer_1.z = g_adcs_data.magnetometer_data[EC_MAG_0_PZ_1].z;
 	} else {
 		CO_OD_RAM.pos_z_magnetometer_1.x = INT16_MAX;
 		CO_OD_RAM.pos_z_magnetometer_1.y = INT16_MAX;
@@ -292,9 +284,9 @@ static void handle_can_open_data(void)
 	}
 
 	if (1) { // g_adcs_data.magetometer_data[EC_MAG_3_PZ_2].is_working) {
-		CO_OD_RAM.pos_z_magnetometer_2.x = g_adcs_data.magnetometer_data[EC_MAG_3_PZ_2].x;
-		CO_OD_RAM.pos_z_magnetometer_2.y = g_adcs_data.magnetometer_data[EC_MAG_3_PZ_2].y;
-		CO_OD_RAM.pos_z_magnetometer_2.z = g_adcs_data.magnetometer_data[EC_MAG_3_PZ_2].z;
+		CO_OD_RAM.pos_z_magnetometer_2.x = g_adcs_data.magnetometer_data[EC_MAG_1_PZ_2].x;
+		CO_OD_RAM.pos_z_magnetometer_2.y = g_adcs_data.magnetometer_data[EC_MAG_1_PZ_2].y;
+		CO_OD_RAM.pos_z_magnetometer_2.z = g_adcs_data.magnetometer_data[EC_MAG_1_PZ_2].z;
 	} else {
 		CO_OD_RAM.pos_z_magnetometer_2.x = INT16_MAX;
 		CO_OD_RAM.pos_z_magnetometer_2.y = INT16_MAX;
@@ -302,9 +294,9 @@ static void handle_can_open_data(void)
 	}
 
 	if (1) { // g_adcs_data.magetometer_data[EC_MAG_0_MZ_1].is_working) {
-		CO_OD_RAM.min_z_magnetometer_1.x = g_adcs_data.magnetometer_data[EC_MAG_0_MZ_1].x;
-		CO_OD_RAM.min_z_magnetometer_1.y = g_adcs_data.magnetometer_data[EC_MAG_0_MZ_1].y;
-		CO_OD_RAM.min_z_magnetometer_1.z = g_adcs_data.magnetometer_data[EC_MAG_0_MZ_1].z;
+		CO_OD_RAM.min_z_magnetometer_1.x = g_adcs_data.magnetometer_data[EC_MAG_2_MZ_1].x;
+		CO_OD_RAM.min_z_magnetometer_1.y = g_adcs_data.magnetometer_data[EC_MAG_2_MZ_1].y;
+		CO_OD_RAM.min_z_magnetometer_1.z = g_adcs_data.magnetometer_data[EC_MAG_2_MZ_1].z;
 	} else {
 		CO_OD_RAM.min_z_magnetometer_1.x = INT16_MAX;
 		CO_OD_RAM.min_z_magnetometer_1.y = INT16_MAX;
@@ -312,9 +304,9 @@ static void handle_can_open_data(void)
 	}
 
 	if (1) { // g_adcs_data.magetometer_data[EC_MAG_1_MZ_2].is_working) {
-		CO_OD_RAM.min_z_magnetometer_2.x = g_adcs_data.magnetometer_data[EC_MAG_1_MZ_2].x;
-		CO_OD_RAM.min_z_magnetometer_2.y = g_adcs_data.magnetometer_data[EC_MAG_1_MZ_2].y;
-		CO_OD_RAM.min_z_magnetometer_2.z = g_adcs_data.magnetometer_data[EC_MAG_1_MZ_2].z;
+		CO_OD_RAM.min_z_magnetometer_2.x = g_adcs_data.magnetometer_data[EC_MAG_3_MZ_2].x;
+		CO_OD_RAM.min_z_magnetometer_2.y = g_adcs_data.magnetometer_data[EC_MAG_3_MZ_2].y;
+		CO_OD_RAM.min_z_magnetometer_2.z = g_adcs_data.magnetometer_data[EC_MAG_3_MZ_2].z;
 	} else {
 		CO_OD_RAM.min_z_magnetometer_2.x = INT16_MAX;
 		CO_OD_RAM.min_z_magnetometer_2.y = INT16_MAX;

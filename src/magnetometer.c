@@ -64,34 +64,6 @@ extern const k_tid_t mag_id;
 static bool mag_0_good;
 static bool mag_1_good;
 
-#if 0
-// FROM CHIBIOS CODE:
-typedef enum {
-	EC_MAG_0_MZ_1 = 0,
-	EC_MAG_1_MZ_2,
-	EC_MAG_2_PZ_1,
-	EC_MAG_3_PZ_2,
-	EC_MAG_NONE,
-} end_card_magnetometoer_t;
-
-typedef struct {
-	volatile bool is_initialized;
-	volatile bool is_working;
-} magnetometer_data_struct_t;
-
-typedef struct  {
-	bmi088_accelerometer_sample_t accl_data;
-	bmi088_gyro_sample_t gyro_sample;
-	int16_t temp_c;
-
-	mt_pwm_phase_data_t mt_pwm_data[3];
-
-	magnetometer_data_struct_t magetometer_data[4];
-} adcs_data_t;
-
-adcs_data_t g_adcs_data;
-#endif
-
 //----------------------------------------------------------------------
 // - SECTION - routines
 //----------------------------------------------------------------------
@@ -251,9 +223,9 @@ int get_mag_reading(int mag_num, int32_t *x, int32_t *y, int32_t *z)
 	What we want is to convert the reading to milligauss.
 	*/
 
-	*x = (int32_t)(SHIFT_Q31_TO_F32(mag_data[mag_num].readings[0].x, mag_data[0].shift) * 1000.0f);
-	*y = (int32_t)(SHIFT_Q31_TO_F32(mag_data[mag_num].readings[0].y, mag_data[0].shift) * 1000.0f);
-	*z = (int32_t)(SHIFT_Q31_TO_F32(mag_data[mag_num].readings[0].z, mag_data[0].shift) * 1000.0f);
+	*x = (int32_t)(SHIFT_Q31_TO_F32(mag_data[mag_num].readings[0].x, mag_data[mag_num].shift) * 1000.0f);
+	*y = (int32_t)(SHIFT_Q31_TO_F32(mag_data[mag_num].readings[0].y, mag_data[mag_num].shift) * 1000.0f);
+	*z = (int32_t)(SHIFT_Q31_TO_F32(mag_data[mag_num].readings[0].z, mag_data[mag_num].shift) * 1000.0f);
 
 	return 0;
 }
@@ -302,9 +274,9 @@ static void handle_mag(void *p1, void *p2, void *p3)
 					break;
 			}
 
-			LOG_DBG("Decoding mag 0");
+			LOG_DBG("Decoding mag 0 into plus Z mag 1");
 			decoder->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_XYZ, 0},
-											&mag_fit, 1, &mag_data[0]);
+											&mag_fit, 1, &mag_data[EC_MAG_0_PZ_1]);
 		}
 
 //------------------------------------------------------
@@ -330,9 +302,9 @@ static void handle_mag(void *p1, void *p2, void *p3)
 					break;
 			}
 
-			LOG_DBG("Decoding mag 1");
+			LOG_DBG("Decoding mag 1 into plus Z mag 2");
 			decoder_b->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_XYZ, 0},
-											&mag_fit_b, 1, &mag_data[1]);
+											&mag_fit_b, 1, &mag_data[EC_MAG_1_PZ_2]);
 		}
 #endif
 
