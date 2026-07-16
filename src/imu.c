@@ -574,7 +574,7 @@ static void handle_imu(void *p1, void *p2, void *p3)
 	int count = 0;
 	int i;
 	uint8_t int_status;
-	int16_t temp;
+	int16_t temp = 0;
 
 	LOG_INF("Starting imu loop");
 	for (;;) {
