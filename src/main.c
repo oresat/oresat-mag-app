@@ -63,6 +63,5 @@ int main(void)
 	LOG_INF("   App    Version: %s", APP_VERSION_STRING);
 	LOG_INF("   Zephyr Version: %s", KERNEL_VERSION_STRING);
 
-	//LOG_INF("   *** node loader works! ***");
 	return 0;
 }
