@@ -8,7 +8,9 @@
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/rtio/rtio.h>
 #include <zephyr/logging/log.h>
+#if defined(CONFIG_CAN)
 #include <canopennode.h>
+#endif
 #include <CO_OD.h>
 #include <version.h>
 #include <app_version.h>
@@ -18,6 +20,7 @@
 #include "adc.h"
 #include "imu.h"
 #include "magnetometer.h"
+#include "windowed_average.h"
 
 LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_DBG);
 
@@ -33,6 +36,8 @@ LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_DBG);
 #define PWM_UPDATE_CHECK_PERIOD 10				// ms
 #define ISENSE_GAIN 50.0f						// gain of the INA185 op amp
 #define ISENSE_R_OHMS 0.030f					// resistance between the op amp + and - inputs
+#define VSENSE_INPUT_OFFSET_TYP_UV 5			// typically, the INA185 can have +/- this many microvolts offset on the input (pre-gain)
+#define VSENSE_INPUT_OFFSET_MAX_UV 55			// maximum offset in microvolts -- even when no current is flowing through Rsense
 
 #define DAC_RANGE 4096							// TODO: use real value from device tree
 #define DAC_VREF 3.3f
@@ -82,6 +87,9 @@ typedef struct {
 	int32_t goal_pwm_percent;			// Negative values indicate the phase should be inverted
 
 	int32_t active_pwm_percent;			// 0-10000
+
+	wnd_avg_store ofs_mv_store;			// used to compute running average of a recent set of offset voltages
+	uint32_t ofs_mv;					// compensation for inherent op-amp input voltage offset
 	float feedback_measurement_V;		// Volts, Note: this is the average voltage while the PWM output is high.
 	int32_t feedback_measurement_uA;	// uA. Note: this is the average current flowing while the PWM output is high. It does not represent overall average current.
 
@@ -109,7 +117,11 @@ typedef struct  {
 	three_axis_data magnetometer_data[4];
 } adcs_data_t;
 
-static adcs_data_t g_adcs_data;
+static adcs_data_t g_adcs_data = {
+	.mt_pwm_data[0].ofs_mv_store.name = "adcx",
+	.mt_pwm_data[1].ofs_mv_store.name = "adcy",
+	.mt_pwm_data[2].ofs_mv_store.name = "adcz"
+};
 
 typedef enum {
 	EC_MAG_0_MZ_1 = 0,
@@ -303,9 +315,9 @@ static void print_debug_output(void) {
 
 		LOG_DBG( "  CO_OD_RAM.temperature = %d", CO_OD_RAM.temperature);
 
-		LOG_DBG( "  CO_OD_RAM.magnetorquer_current_x.current_set = %d", CO_OD_RAM.magnetorquer.current_x_setpoint);
-		LOG_DBG( "  CO_OD_RAM.magnetorquer_current_y.current_set = %d", CO_OD_RAM.magnetorquer.current_y_setpoint);
-		LOG_DBG( "  CO_OD_RAM.magnetorquer_current_z.current_set = %d", CO_OD_RAM.magnetorquer.current_z_setpoint);
+		LOG_DBG( "  CO_OD_RAM.magnetorquer_current_x.current_setpoint = %d", CO_OD_RAM.magnetorquer.current_x_setpoint);
+		LOG_DBG( "  CO_OD_RAM.magnetorquer_current_y.current_setpoint = %d", CO_OD_RAM.magnetorquer.current_y_setpoint);
+		LOG_DBG( "  CO_OD_RAM.magnetorquer_current_z.current_setpoint = %d", CO_OD_RAM.magnetorquer.current_z_setpoint);
 
 		LOG_DBG( "  CO_OD_RAM.magnetorquer_pwm_percent.x = %d", CO_OD_RAM.magnetorquer.pwm_x);
 		LOG_DBG( "  CO_OD_RAM.magnetorquer_pwm_percent.y = %d", CO_OD_RAM.magnetorquer.pwm_y);
@@ -333,10 +345,10 @@ static void print_debug_output(void) {
 
 		for (int i = 0; i < 3; i++) {
 			mt_pwm_phase_data_t *data = &g_adcs_data.mt_pwm_data[i];
-			LOG_DBG( "  i_sense[%d] = %d uA, %u mV",
+			LOG_DBG( "  i_sense[%d] = %d uA, %.3f mV",
 					i,
 					data->feedback_measurement_uA,
-					(uint32_t) (data->feedback_measurement_V * 1000.0f));
+					(double)(data->feedback_measurement_V * 1000.0f));
 		}
 		//LOG_DBG( "  CO_EM_GENERIC_ERROR:  %u", CO_isError(CO->em, CO_EM_GENERIC_ERROR));
 	}
@@ -359,6 +371,10 @@ static int32_t calc_pwm_from_uA_setpoint(const int32_t target_uA, int axis)
 {
 	int32_t pwm = 0;
 
+	if (target_uA == 0) {
+		return pwm;
+	}
+
 	const int32_t actual_uA = g_adcs_data.mt_pwm_data[axis].feedback_measurement_uA;
 	const int32_t max_pwm_duty_cycle = max_pwm_duty_cycles[axis];
 
@@ -366,6 +382,10 @@ static int32_t calc_pwm_from_uA_setpoint(const int32_t target_uA, int axis)
 	int32_t error = target_uA - actual_uA;
 
 	pwm = feed_forward + error * Kp[axis];
+
+	LOG_DBG("Axis:%d, target_uA:%d, actual_uA:%d, max_pwm:%d, Kff:%d, Kp:%d, ff:%d, error:%d, pwm:%d",
+			axis, target_uA, actual_uA, max_pwm_duty_cycle, Kff[axis], Kp[axis],
+			feed_forward, error, pwm);
 	pwm = saturate_int32_t(pwm, -max_pwm_duty_cycle, max_pwm_duty_cycle);
 	return(pwm);
 
@@ -428,7 +448,22 @@ static int get_current_readings(mt_pwm_phase_data_t *axes)
 			continue;
 		}
 
-		measured_i_sense_voltage = ((float)adc_mv) / (1000.0f * ISENSE_GAIN);
+		// TODO: deal with Vin offset pre-gain on op-amp.
+		// Post-gain will be +/-5uV * 50 = 0.25 mA typical,
+		// +/-55uV * 50 = 2.75 mA maximum on the ADC input, when PWM = 0.
+		// This is equivalent to 166 to 1833 uA, below which we cannot measure.
+		// This also means pwm values might have a deadband between 0 and 700
+		// on the 10,000 range scale.
+		// Question: can we measure the at-rest ADC right before turning on the PWM to
+		// a non-zero value, and just use that as the ofs_mv below? How much can it
+		// drift while the ADCS is actively requesting current? How long will the duration
+		// be for the ADCS request? Seconds? Minutes? Hours?
+
+		if (axes[i].active_pwm_percent == 0) {
+			axes[i].ofs_mv = update_windowed_average(&axes[i].ofs_mv_store, adc_mv);
+		}
+
+		measured_i_sense_voltage = ((float)(adc_mv - axes[i].ofs_mv)) / (1000.0f * ISENSE_GAIN);
 
 		microamps = (measured_i_sense_voltage / ISENSE_R_OHMS) * 1000000.0f;
 		sign = (axes[i].active_pwm_percent < 0) ? -1 : 1;
@@ -467,7 +502,8 @@ static int set_pwm_phase(int i, bool level)
 	return ret;
 }
 
-static int set_pwm_output(void) {
+static int set_pwm_output(mt_pwm_phase_data_t *axes)
+{
 	int ret = 0;
 	int err = 0;
 
@@ -476,37 +512,35 @@ static int set_pwm_output(void) {
 		bool new_state;
 
 		//Updates will come in periodically via CANOpen, this will apply those updates to the PWM outputs.
-		if ((g_adcs_data.mt_pwm_data[i].last_update_time == 0) ||
-			((t_now - g_adcs_data.mt_pwm_data[i].last_update_time) > PWM_UPDATE_CHECK_PERIOD)) {
+		if ((axes[i].last_update_time == 0) ||
+			((t_now - axes[i].last_update_time) > PWM_UPDATE_CHECK_PERIOD)) {
 
-			if( g_adcs_data.mt_pwm_data[i].active_pwm_percent != g_adcs_data.mt_pwm_data[i].goal_pwm_percent ) {
-				LOG_DBG("goal_pwm_percent = %d", g_adcs_data.mt_pwm_data[i].goal_pwm_percent);
+			if( axes[i].active_pwm_percent != axes[i].goal_pwm_percent ) {
+				LOG_DBG("goal_pwm_percent = %d", axes[i].goal_pwm_percent);
 
-				// can't disable on MCXN? pwmDisableChannel(&PWMD1, g_adcs_data.mt_pwm_data[i].pwm_channel_number);
-
-				// TODO: warning -- there may be a delay due to other threads running between changing the phase
-				// below, and setting the new PWM. This could cause a glitch and an unintentional pulse in the wrong
-				// direction.
-				if (g_adcs_data.mt_pwm_data[i].goal_pwm_percent < 0) {
+				if (axes[i].goal_pwm_percent < 0) {
 					new_state = true;
 				} else {
 					new_state = false;
 				}
-				if (g_adcs_data.mt_pwm_data[i].phase_state != new_state) {
+				const int32_t pwm_val = abs(axes[i].goal_pwm_percent);
+
+				// lock scheduler so we minimize delays between changing phase and setting pwm
+				k_sched_lock();
+				if (axes[i].phase_state != new_state) {
 					ret = set_pwm_phase(i, new_state);
-					if (ret) {
+					if (ret) { // this should never be in error, but do the right thing anyway
 						err = ret;
+						k_sched_unlock();
 						continue; // could cause guidance issues? mismatched phase and pwm value?
 					}
-					g_adcs_data.mt_pwm_data[i].phase_state = new_state;
+					axes[i].phase_state = new_state;
 				}
-
-				const int32_t pwm_val = abs(g_adcs_data.mt_pwm_data[i].goal_pwm_percent);
-
 				set_pwm(i, pwm_val); // set_pwm does the scaling from percentage to width
+				k_sched_unlock();
 
-				g_adcs_data.mt_pwm_data[i].active_pwm_percent = g_adcs_data.mt_pwm_data[i].goal_pwm_percent;
-				g_adcs_data.mt_pwm_data[i].last_update_time = t_now;
+				axes[i].active_pwm_percent = axes[i].goal_pwm_percent;
+				axes[i].last_update_time = t_now;
 			}
 		}
 	}
@@ -746,7 +780,7 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 			LOG_WRN("One or more ADC channels read in error: %d", err);
 		}
 
-		err = set_pwm_output();
+		err = set_pwm_output(g_adcs_data.mt_pwm_data);
 		if (err) {
 			LOG_WRN("One or more PWM channels could not be set: %d", err);
 		}
