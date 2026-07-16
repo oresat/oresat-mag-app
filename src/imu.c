@@ -226,6 +226,7 @@ static void load_gyro_calibration(int16_t *gxcal, int16_t *gycal, int16_t *gzcal
 	}
 }
 
+#if defined(CONFIG_SHELL)
 static int store_gyro_calibration(int16_t *gxcal, int16_t *gycal, int16_t *gzcal)
 {
 	int rc;
@@ -245,6 +246,7 @@ static int store_gyro_calibration(int16_t *gxcal, int16_t *gycal, int16_t *gzcal
 
 	return rc;
 }
+#endif
 
 static int reset_imu(void)
 {
