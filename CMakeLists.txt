@@ -40,7 +40,7 @@ include_directories("${PROJECT_SOURCE_DIR}") # needed so c code can find this he
 
 target_sources(app PRIVATE src/main.c src/windowed_average.c)
 
-# Compile in various demos depending on Kconfig values.
+# Compile in various files depending on Kconfig values.
 target_sources_ifdef(CONFIG_DAC_INTF     app PRIVATE src/dac.c)
 target_sources_ifdef(CONFIG_ADC_INTF     app PRIVATE src/adc.c)
 target_sources_ifdef(CONFIG_PWM_INTF     app PRIVATE src/pwm.c)
