@@ -47,7 +47,8 @@ $ west flash -r pyocd
 ```
 
 # Setting the CAN node id
-This can be done through a terminal with the Zephyr shell enabled.
+This can be done through a terminal with the Zephyr shell enabled. This **must be set** to the
+correct number expected by the C3 card. Use `oresat-configs cards` to check which number to use.
 
 This requires three steps in practice:
 1. Build and flash with the `overlay_shell.conf` configuration file applied
@@ -67,9 +68,40 @@ But it will also show, at the bottom of the scroll, a prompt:
 ```
 uart:~$
 ```
-Enter `help` for help.
-Enter `nodeid`<enter> to see the current nodeid.
-Change the node id by entering `nodeid <N>` where N is the desired node id in decimal.
+
+> NOTE: with the shell enabled, the normal control loop taking setpoints over CAN for
+>   magnetorquer current is disabled, and replaced with test code. See the commands starting with **mt**.
+
+Commands:
+- `help` for help. There are many commands included by Zephyr itself not listed below.
+
+- `nodeid`<enter> to see the current nodeid.
+  Change the node id by entering `nodeid <N>` where N is the desired node id in decimal.
+  The value is then stored in the settings partition, so as long as you do not do a full chip erase,
+  it will be remembered.
+
+- `gyrocal [reset]`<enter> to do initial gyroscope calibration without the reset option.
+  The unit must be stationary.
+  If the gyroscope has already been calibrated, add the optional reset parameter: `gyrocal reset`<enter>.
+  Once calibrated, the values obtained are considered an offset from 0 to be subtracted from future
+  measurements. Like the `nodeid`, the calibration values are stored in the settings partition.
+
+- `mtmode [<num>|name] [<axis>]`<enter> to get or set the test mode.
+  - 0 TM_OFF: only other shell commands active; useful to stop the TM_LOOP_RAMP mode
+  - 1 TM_ADC: read and display ADC sense channels
+  - 2 TM_CURRENT: read and display current sense measurements
+  - 3 TM_LOOP: run mt control loop
+  - 4 TM_LOOP_RAMP: run mt control loop while ramping target
+
+- `mtpwm [<axis>] [<new duty cycle value>]`<enter> to get or set an axis's PWM output value. This is only
+  for experimentation in the lab, and is not stored to settings.
+
+- `frqpwm [<axis>] [<new frequency in Hz>]`<enter> to get or set an axis's PWM frequency. This is only for
+  experimentation in the lab, and is not stored to settings.
+
+- `ua2pwm <axis> <target current in uA>`<enter> to set the output current for an axis.
+  This exercises the closed loop control of PWM to set a current. This is similar to the non-shell normal
+  operating mode, except the target current is set via the terminal, rather than over CAN.
 
 ## Rebuilding to remove shell
 Build again, using whatever options you need as explained in the document.
