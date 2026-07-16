@@ -1,0 +1,317 @@
+/*
+ * Copyright 2024 NXP
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* Common dts file to enable supported features for CPU 0.
+ * This file is included by both the default variant
+ * which is run from internal flash and the QSPI variant.
+ */
+/dts-v1/;
+
+#include <nxp/nxp_mcxn94x.dtsi>
+#include <zephyr/dt-bindings/i2c/i2c.h>
+#include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/adc/adc.h>
+#include <zephyr/dt-bindings/adc/mcux-lpadc.h>
+#include <zephyr/dt-bindings/spi/spi.h>
+#include <zephyr/dt-bindings/gpio/nxp-kinetis-gpio.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
+#include <zephyr/dt-bindings/sensor/rm3100.h>
+
+/ {
+	cpus {
+		/delete-node/ cpu@1;
+	};
+
+	oresat_demo: oresat-demo-enabled {}; /* Enable demos for supported boards */
+
+	chosen {
+		zephyr,sram = &sram0;
+		zephyr,flash = &flash;
+		zephyr,flash-controller = &fmu;
+		zephyr,code-partition = &slot0_partition;
+		zephyr,uart-mcumgr = &flexcomm4_lpuart4;
+		zephyr,console = &flexcomm4_lpuart4;
+		zephyr,shell-uart = &flexcomm4_lpuart4;
+		zephyr,canbus = &flexcan0;
+		zephyr,code-cpu1-partition = &slot1_partition;
+	};
+
+	aliases{
+		led0 = &amber_led;
+		watchdog0 = &wwdt0;
+		rtc = &rtc;
+		adc0 = &lpadc0;
+		adc1 = &lpadc1;
+		i2c-0 = &flexcomm0_lpi2c0;
+		mag0 = &rm3100a;
+		mag1 = &rm3100b;
+		pwm0 = &flexpwm1_pwm0;
+		pwm1 = &flexpwm1_pwm1;
+	};
+
+	leds {
+		compatible = "gpio-leds";
+		amber_led: led_1 {
+			gpios = <&gpio1 13 GPIO_ACTIVE_LOW>;
+			label = "Amber LED";
+			status = "okay";
+		};
+	};
+
+	maggpios: mag-gpios {
+		compatible = "mag-card";
+		mag-ready-gpios = <&gpio4 20 0>;	/* in */
+		n-mag-fault-gpios = <&gpio4 19 0>;	/* in */
+		n-mag-en-gpios = <&gpio4 17 0>;		/* out */
+		mt-en-gpios = <&gpio4 16 0>;		/* open drain out */
+		n-mt-en-fault-gpios = <&gpio4 13 0>;/* in */
+		n-mt-stby-rst-gpios = <&gpio4 12 0>;/* out */
+		mt-z-phase-gpios = <&gpio4 7 0>;	/* out */
+		mt-y-phase-gpios = <&gpio4 6 0>;	/* out */
+		mt-x-phase-gpios = <&gpio4 5 0>;	/* out */
+	};
+
+	zephyr,user {
+		dac0 = <&dac0>;
+		dac-channel-id = <0>;
+		dac-resolution = <12>;
+		status = "okay";
+	};
+};
+
+&flexcomm0 {
+	status = "okay";
+};
+
+&flexcomm0_lpi2c0 {
+	pinctrl-0 = <&pinmux_flexcomm0_lpi2c>;
+	pinctrl-names = "default";
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+	status = "okay";
+
+	rm3100a: rm3100@20 {
+			compatible = "pni,rm3100";
+			reg = <0x20>;
+			odr = <RM3100_DT_ODR_600>;
+			status = "okay";
+			zephyr,deferred-init;
+	};
+	rm3100b: rm3100@22 {
+			compatible = "pni,rm3100";
+			reg = <0x22>;
+			odr = <RM3100_DT_ODR_600>;
+			status = "okay";
+			zephyr,deferred-init;
+	};
+};
+
+&flexcomm4 {
+	status = "okay";
+};
+
+&flexcomm4_lpuart4 {
+	current-speed = <115200>;
+	pinctrl-0 = <&pinmux_flexcomm4_lpuart>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&flexcan0 {
+	pinctrl-0 = <&pinmux_flexcan0>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+/*
+ * Default for this board is to allocate SRAM0-5 to cpu0 but the
+ * application can have an application specific device tree to
+ * allocate the SRAM0-7 differently.
+ *
+ * For example, SRAM0-6 could be allocated to cpu0 with only SRAM7
+ * for cpu1. This would require the value of sram0 to have a DT_SIZE_K
+ * of 384. You would have to make updates to cpu1 sram settings as well.
+ */
+&sram0 {
+	compatible = "mmio-sram";
+	reg = <0x20000000 DT_SIZE_K(320)>;
+};
+
+&sram {
+	sramg: memory@20050000 {
+		compatible = "mmio-sram";
+		reg = <0x20050000 DT_SIZE_K(64)>;
+	};
+	sramh: memory@20060000 {
+		compatible = "mmio-sram";
+		reg = <0x20060000 DT_SIZE_K(32)>;
+	};
+};
+
+&flash {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		/*
+		 * Partition sizes must be aligned
+		 * to the flash memory sector size of 8KB.
+		 */
+		boot_partition: partition@0 {
+			label = "mcuboot";
+			reg = <0x00000000 DT_SIZE_K(80)>;
+		};
+		slot0_partition: partition@14000 {
+			label = "image-0";
+			reg = <0x00014000 DT_SIZE_K(968)>;
+		};
+		slot1_partition: partition@10A000 {
+			label = "image-1";
+			reg = <0x0010A000 DT_SIZE_K(968)>;
+		};
+		storage_partition: partition@1fc000 {
+			label = "storage";
+			reg = <0x001fc000 DT_SIZE_K(16)>;
+		};
+	};
+};
+
+&mbox {
+	status = "disabled";
+};
+
+&gpio4 {
+	status = "okay";
+};
+
+&gpio1 {
+	status = "okay";
+};
+
+&gpio0 {
+	status = "okay";
+};
+
+&gpio2 {
+	status = "okay";
+};
+
+&edma0 {
+	status = "disabled";
+};
+
+&wwdt0 {
+	status = "okay";
+};
+
+&systick {
+	status = "okay";
+};
+
+&ctimer0 {
+	status = "disabled";
+};
+
+&vref {
+	status = "okay";
+};
+
+&lptmr0 {
+	status = "disabled";
+};
+
+&flexio0 {
+	status = "disabled";
+};
+
+&mrt0_channel0 {
+	status = "disabled";
+};
+
+&rtc {
+	status = "okay";
+};
+
+&sc_timer {
+	pinctrl-0 = <&pinmux_sctimer>;
+	pinctrl-names = "default";
+	status = "disabled";
+};
+
+&enet {
+	status = "disabled";
+};
+
+&flexpwm1_pwm0 {
+	pinctrl-0 = <&pinmux_flexpwm1_pwm0>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&flexpwm1_pwm1 {
+	pinctrl-0 = <&pinmux_flexpwm1_pwm1>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&dac0 {
+	pinctrl-0 = <&pinmux_dac0>;
+	pinctrl-names = "default";
+	voltage-reference = <0>;
+	status = "okay";
+};
+
+&lpadc0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinmux_lpadc0_0>, <&pinmux_lpadc0_1>;
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+	lpadc0_0: channel@0 { /* Z */
+		reg = <0>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_EXTERNAL0";
+		zephyr,vref-mv = <3300>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS,2)>;
+		zephyr,resolution = <12>;
+		zephyr,oversampling = <7>;
+		zephyr,input-positive = <MCUX_LPADC_CH0A>;
+		/delete-property/ zephyr,differential;
+	};
+	lpadc0_1: channel@1 { /* Y */
+		reg = <1>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_EXTERNAL0";
+		zephyr,vref-mv = <3300>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS,2)>;
+		zephyr,resolution = <12>;
+		zephyr,oversampling = <7>;
+		zephyr,input-positive = <MCUX_LPADC_CH0B>;
+		/* from unnessessary rework: <MCUX_LPADC_CH1A>; */
+		/delete-property/ zephyr,differential;
+	};
+};
+
+&lpadc1 {
+	pinctrl-0 = <&pinmux_lpadc1>;
+	pinctrl-names = "default";
+
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+
+	lpadc1_0: channel@0 { /* X */
+		reg = <0>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_EXTERNAL0";
+		zephyr,vref-mv = <3300>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS,2)>;
+		zephyr,resolution = <12>;
+		zephyr,oversampling = <7>;
+		zephyr,input-positive = <MCUX_LPADC_CH0A>;
+		/delete-property/ zephyr,differential;
+	};
+};

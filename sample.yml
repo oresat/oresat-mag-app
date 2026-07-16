@@ -1,0 +1,14 @@
+sample:
+  name: RM3100 RTIO sample
+tests:
+  sample.rtio.sensor_batch_processing:
+    tags: rtio
+    integration_platforms:
+      - rpi_pico
+    harness: console
+    harness_config:
+      type: multi_line
+      regex:
+        - "(.*)Submitting (.*) read requests"
+        - "(.*)Start processing (.*) samples"
+        - "(.*)Finished processing (.*) samples"

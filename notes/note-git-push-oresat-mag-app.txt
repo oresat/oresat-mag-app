@@ -1,0 +1,9 @@
+Git origin not set, so push with:
+
+$ git push git@github.com:oresat/oresat-mag-app mag-card-zephyr
+
+In other news . . .
+
+*  https://www.npr.org/2026/04/11/nx-s1-5773321/viktor-orban-hungary-hometown
+
+*  https://www.theatlantic.com/ideas/2026/04/illiberalism-not-inevitable/686778/ - Anne Applebaum 2026-04-12

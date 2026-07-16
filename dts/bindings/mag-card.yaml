@@ -1,0 +1,52 @@
+# Oresat mag card
+# TODO: replace below with proper gpios for mag card; these are from the proto card
+
+description: Oresat mag card
+
+compatible: "mag-card"
+
+properties:
+  mag-ready-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO input or output.
+
+  n-mag-fault-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO input or output.
+
+  n-mag-en-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO input or output.
+
+  mt-en-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO input or output.
+
+  n-mt-en-fault-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO input or output.
+
+  n-mt-stby-rst-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO input or output.
+
+  mt-z-phase-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO input or output.
+
+  mt-y-phase-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO input or output.
+
+  mt-x-phase-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO input or output.
