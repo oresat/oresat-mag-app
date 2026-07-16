@@ -16,8 +16,8 @@ Ensure you are in the `mag` directory (`cd src/oresat/firmware/apps/mag`) prior 
 
 | Board         | Build Example                                         |
 | ------------- | ----------------------------------------------------- |
-| mcxn947_mag_card | `west build -p always -b mcxn947_mag_card/mcxn947/cpu0` |
-| mcxn947_mag_card with shell | `west build -p always -b mcxn947_mag_card/mcxn947/cpu0 -- -DEXTRA_CONF_FILE=overlay_shell.conf` |
+| mcxn947_mag_card | `west build -p always -b mcxn947_mag_card/mcxn947/cpu0 -- -DCONFIG_MCUBOOT_ALLOWED=n` |
+| mcxn947_mag_card with shell | `west build -p always -b mcxn947_mag_card/mcxn947/cpu0 -- -DEXTRA_CONF_FILE=overlay_shell.conf -DCONFIG_MCUBOOT_ALLOWED=n` |
 | mcxn947_mag_card with MCUboot | `west build -p always -b mcxn947_mag_card/mcxn947/cpu0 --sysbuild -- -DBOARD_ROOT=$PWD` |
 
 > NOTE: the section below only gives general instructions. Specific steps below (like for setting the CAN node id) are self-contained

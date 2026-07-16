@@ -1,5 +1,6 @@
 board:
   name: mcxn947_breakoutcard
+  full_name: Oresat MCXN947 Breakout
   vendor: nxp
   socs:
     - name: mcxn947
