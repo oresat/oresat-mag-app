@@ -487,15 +487,22 @@ static int get_mag_readings(three_axis_data *axes)
 {
 	int i;
 	int err = 0;
+	int32_t mx;
+	int32_t my;
+	int32_t mz;
 
 	for (i = 0; i < NUM_MAGS; i++) {
-		int ret = get_mag_reading(i,
-								  &axes[i].x, // get reading in milligauss
-								  &axes[i].y,
-								  &axes[i].z);
+		int ret = get_mag_reading(i, &mx, &my, &mz); // get readings in milligauss
 		if (ret) {
 			err = ret; // be sure to report any errors, even just 1
 		}
+		// correct the orientation to be in the spacecraft frame of reference,
+		// not the sensor IC frame of reference
+		// Report X = sensor Y
+		// Report Y = -sensor X
+		axes[i].x = my;
+		axes[i].y = -mx;
+		axes[i].z = mz;
 	}
 
 	return err;
