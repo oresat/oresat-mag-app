@@ -50,3 +50,18 @@ properties:
     type: phandle-array
     required: true
     description: GPIO input or output.
+
+  hw-rev-bit-0-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO input or output.
+
+  hw-rev-bit-1-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO input or output.
+
+  hw-rev-bit-2-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO input or output.

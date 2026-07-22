@@ -72,6 +72,9 @@
 		mt-z-phase-gpios = <&gpio4 7 GPIO_ACTIVE_LOW>;	/* out */
 		mt-y-phase-gpios = <&gpio4 6 GPIO_ACTIVE_LOW>;	/* out */
 		mt-x-phase-gpios = <&gpio4 5 GPIO_ACTIVE_LOW>;	/* out */
+		hw-rev-bit-0-gpios = <&gpio0 21 0>; /* in -- enable pull up in init code */
+		hw-rev-bit-1-gpios = <&gpio0 22 0>; /* in -- enable pull up in init code */
+		hw-rev-bit-2-gpios = <&gpio0 23 0>; /* in -- enable pull up in init code */
 	};
 
 	zephyr,user {
@@ -79,6 +82,7 @@
 		dac-channel-id = <0>;
 		dac-resolution = <12>;
 		status = "okay";
+		r58-ohms = <237>; /* DAC output voltage divider numerator; denominator is 1K */
 	};
 };
 
