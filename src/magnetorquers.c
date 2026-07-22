@@ -378,7 +378,7 @@ static void print_debug_output(void) {
 		LOG_DBG( "  CO_OD_RAM.magnetorquer_current.y = %d", CO_OD_RAM.magnetorquer.current_y);
 		LOG_DBG( "  CO_OD_RAM.magnetorquer_current.z = %d", CO_OD_RAM.magnetorquer.current_z);
 
-#if 1 // current hardware does not support the +Z magnetometers
+// current hardware does not support the -Z magnetometers
 		LOG_DBG( "  CO_OD_RAM.pos_z_magnetometer_1.x = %d", CO_OD_RAM.pos_z_magnetometer_1.x);
 		LOG_DBG( "  CO_OD_RAM.pos_z_magnetometer_1.y = %d", CO_OD_RAM.pos_z_magnetometer_1.y);
 		LOG_DBG( "  CO_OD_RAM.pos_z_magnetometer_1.z = %d", CO_OD_RAM.pos_z_magnetometer_1.z);
@@ -391,10 +391,9 @@ static void print_debug_output(void) {
 		LOG_DBG( "  CO_OD_RAM.min_z_magnetometer_1.y = %d", CO_OD_RAM.min_z_magnetometer_1.y);
 		LOG_DBG( "  CO_OD_RAM.min_z_magnetometer_1.z = %d", CO_OD_RAM.min_z_magnetometer_1.z);
 
-		LOG_DBG( "  CO_OD_RAM.min_z_magnetometer_1.x = %d", CO_OD_RAM.min_z_magnetometer_2.x);
-		LOG_DBG( "  CO_OD_RAM.min_z_magnetometer_1.y = %d", CO_OD_RAM.min_z_magnetometer_2.y);
-		LOG_DBG( "  CO_OD_RAM.min_z_magnetometer_1.z = %d", CO_OD_RAM.min_z_magnetometer_2.z);
-#endif
+		LOG_DBG( "  CO_OD_RAM.min_z_magnetometer_2.x = %d", CO_OD_RAM.min_z_magnetometer_2.x);
+		LOG_DBG( "  CO_OD_RAM.min_z_magnetometer_2.y = %d", CO_OD_RAM.min_z_magnetometer_2.y);
+		LOG_DBG( "  CO_OD_RAM.min_z_magnetometer_2.z = %d", CO_OD_RAM.min_z_magnetometer_2.z);
 
 		for (int i = 0; i < 3; i++) {
 			mt_pwm_phase_data_t *data = &g_adcs_data.mt_pwm_data[i];
