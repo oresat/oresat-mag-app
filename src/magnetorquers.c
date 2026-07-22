@@ -45,9 +45,14 @@ LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_DBG);
 #define VSENSE_INPUT_OFFSET_TYP_UV 5			// typically, the INA185 can have +/- this many microvolts offset on the input (pre-gain)
 #define VSENSE_INPUT_OFFSET_MAX_UV 55			// maximum offset in microvolts -- even when no current is flowing through Rsense
 
+#define ZEPHYR_USER_NODE DT_PATH(zephyr_user)
 #define DAC_RANGE 4096							// TODO: use real value from device tree
 #define DAC_VREF 3.3f
-#define R1_OHMS 237								// R58 should have been 23.7K
+#if (DT_NODE_HAS_PROP(ZEPHYR_USER_NODE, r58_ohms))
+#define R1_OHMS DT_PROP(ZEPHYR_USER_NODE, r58_ohms)
+#else
+#define R1_OHMS 237								// R58 should have been 23.7K -- NOTE: might be defined below based on device tree
+#endif
 #define R2_OHMS 1000							// R59
 #define R_SENSE_TOTAL (2 * ISENSE_R_OHMS)		// shown in schematic, a second ISENSE_R_OHMS is in series from the op amp - input to ground
 #define MAGNETORQUER_CURRENT_LIMIT_A 2.0f		// specified in schematic
@@ -161,8 +166,13 @@ static const struct gpio_dt_spec n_mt_stby_rst = GPIO_DT_SPEC_GET(BP_NODE, n_mt_
 static const struct gpio_dt_spec mt_x_phase = GPIO_DT_SPEC_GET(BP_NODE, mt_x_phase_gpios);
 static const struct gpio_dt_spec mt_y_phase = GPIO_DT_SPEC_GET(BP_NODE, mt_y_phase_gpios);
 static const struct gpio_dt_spec mt_z_phase = GPIO_DT_SPEC_GET(BP_NODE, mt_z_phase_gpios);
+static const struct gpio_dt_spec hw_rev_bit_0 = GPIO_DT_SPEC_GET(BP_NODE, hw_rev_bit_0_gpios);
+static const struct gpio_dt_spec hw_rev_bit_1 = GPIO_DT_SPEC_GET(BP_NODE, hw_rev_bit_1_gpios);
+static const struct gpio_dt_spec hw_rev_bit_2 = GPIO_DT_SPEC_GET(BP_NODE, hw_rev_bit_2_gpios);
 
 static int32_t control_current(const int32_t target_uA, int axis);
+
+static unsigned board_rev;
 
 /**************************************************/
 
@@ -201,6 +211,10 @@ static int init_gpios(void)
 	if (ret) {
 		return ret;
 	}
+
+	ret = gpio_pin_configure_dt(&hw_rev_bit_0, GPIO_INPUT | GPIO_PULL_UP);
+	ret = gpio_pin_configure_dt(&hw_rev_bit_1, GPIO_INPUT | GPIO_PULL_UP);
+	ret = gpio_pin_configure_dt(&hw_rev_bit_2, GPIO_INPUT | GPIO_PULL_UP);
 
 	return ret;
 }
@@ -717,14 +731,20 @@ static int init_magnetorquer(void) {
 		return err;
 	}
 
+	board_rev = gpio_pin_get_dt(&hw_rev_bit_0) << 0 |
+				gpio_pin_get_dt(&hw_rev_bit_1) << 1 |
+				gpio_pin_get_dt(&hw_rev_bit_2) << 2;
+
+	LOG_INF("Board Rev %u", board_rev);
+
 	err = init_dac();
 	if (err) {
 		LOG_ERR("Error initializing DAC: %d", err);
 		return err;
 	}
 
-	LOG_DBG("Set MT_ILIM; VREF_MV = %d, VOUT_MV = %d, DAC = %d",
-			(int)(VREF * 1000.0f), (int)(VOUT * 1000.0f), MT_ILIM_DAC_VALUE);
+	LOG_DBG("Set MT_ILIM; VREF_MV = %d, VOUT_MV = %d, DAC = %d, R58 = %u ohms",
+			(int)(VREF * 1000.0f), (int)(VOUT * 1000.0f), MT_ILIM_DAC_VALUE, R1_OHMS);
 	err = write_dac(MT_ILIM_DAC_VALUE);
 	if (err) {
 		LOG_ERR("Error writing DAC: %d", err);
