@@ -175,9 +175,8 @@ int init_mag(void)
 	ret = device_init(rm3100a_dev);
 	if (ret < 0) {
 		LOG_ERR("Error initializing rm3100a device driver: %d", ret);
-		return ret;
-	}
-	if (check_rm3100_sensor(rm3100a_dev) == NULL) {
+		mag_0_good = false;
+	} else if (check_rm3100_sensor(rm3100a_dev) == NULL) {
 		LOG_ERR("Could not find RM3100 magnetometer instance 'a'");
 		ret = -ENODEV;
 		mag_0_good = false;
