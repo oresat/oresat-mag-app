@@ -24,9 +24,9 @@ menu "Oresat MCXN947 Mag Card"
 			int "Number of samples to be made on the sequence for each channel."
 			default 1
 
-   	config SEQUENCE_OVERSAMPLING
-   		int "Number of conversion results to average for each sample."
-   		default 7
+		config SEQUENCE_OVERSAMPLING
+			int "Number of conversion results to average for each sample."
+			default 7
 
 		config SEQUENCE_RESOLUTION
 			int "Set the resolution of the sequence readings."
@@ -56,11 +56,27 @@ config MAG
 	help
 	  Enable the Magnetometer handling.
 
+config IMU_ICM
+	bool
+	help
+	  Use the ICM-42688 in-app driver.
+
+config IMU_BMI
+	bool
+	help
+	  Use the BMI-270 Zephyr driver.
+
 config IMU
 	bool "Enable IMU sampling and transfer"
 	default y
+	select IMU_ICM if !BMI270
+	select IMU_BMI if BMI270
 	help
-	  Enable the IMU handling.
+	  Enable the IMU handling. BMI270 is automatically enabled
+	  if the device tree includes an i2c node with
+	  compatible = "bosch,bmi270". Otherwise we use our
+	  ICM driver implemented in user app code rather than an
+	  actual Zephyr driver.
 
 config MAGNETORQUERS
 	bool "Enable magetorquer control"
