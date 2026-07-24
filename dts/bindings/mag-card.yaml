@@ -65,3 +65,13 @@ properties:
     type: phandle-array
     required: true
     description: GPIO input or output.
+
+  tcan-nfault-oc-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO input or output.
+
+  tcan-silent-gpios:
+    type: phandle-array
+    required: true
+    description: GPIO input or output.
