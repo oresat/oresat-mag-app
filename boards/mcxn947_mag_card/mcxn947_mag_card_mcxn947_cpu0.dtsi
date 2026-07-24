@@ -75,6 +75,8 @@
 		hw-rev-bit-0-gpios = <&gpio0 21 0>; /* in -- enable pull up in init code */
 		hw-rev-bit-1-gpios = <&gpio0 22 0>; /* in -- enable pull up in init code */
 		hw-rev-bit-2-gpios = <&gpio0 23 0>; /* in -- enable pull up in init code */
+		tcan-nfault-oc-gpios = <&gpio1 12 0>; /* in; only on board v1.1 */
+		tcan-silent-gpios = <&gpio1 14 0>;	/* out; only on board v1.1 */
 	};
 
 	zephyr,user {
@@ -106,6 +108,20 @@
 	rm3100b: rm3100@22 {
 			compatible = "pni,rm3100";
 			reg = <0x22>;
+			odr = <RM3100_DT_ODR_300>;
+			status = "okay";
+			zephyr,deferred-init;
+	};
+	rm3100c: rm3100@21 {
+			compatible = "pni,rm3100";
+			reg = <0x21>;
+			odr = <RM3100_DT_ODR_300>;
+			status = "okay";
+			zephyr,deferred-init;
+	};
+	rm3100d: rm3100@23 {
+			compatible = "pni,rm3100";
+			reg = <0x23>;
 			odr = <RM3100_DT_ODR_300>;
 			status = "okay";
 			zephyr,deferred-init;
@@ -305,7 +321,7 @@
 };
 
 &lpadc1 {
-	pinctrl-0 = <&pinmux_lpadc1>;
+	pinctrl-0 = <&pinmux_lpadc1_0>;
 	pinctrl-names = "default";
 
 	#address-cells = <1>;

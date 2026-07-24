@@ -1,0 +1,37 @@
+
+&flexcomm0_lpi2c0 {
+	bmi270: bmi270@68 {
+		compatible = "bosch,bmi270";
+		reg = <0x68>;
+		status = "okay";
+		zephyr,deferred-init;
+	};
+};
+
+/* Vbusp */
+&pinctrl {
+	pinmux_lpadc1_1: pinmux_lpadc1_1 {
+	   group0 {
+		   pinmux = <ADC1_B4_PIO4_3>;
+		   slew-rate = "fast";
+		   drive-strength = "low";
+	   };
+	};
+};
+
+&lpadc1 {
+	pinctrl-0 = <&pinmux_lpadc1_0>, <&pinmux_lpadc1_1>;
+
+	lpadc1_1: channel@1 { /* Vbusp */
+		reg = <1>;
+		zephyr,gain = "ADC_GAIN_1";
+		zephyr,reference = "ADC_REF_EXTERNAL0";
+		zephyr,vref-mv = <3300>;
+		zephyr,acquisition-time = <ADC_ACQ_TIME(ADC_ACQ_TIME_MICROSECONDS,2)>;
+		zephyr,resolution = <12>;
+		zephyr,oversampling = <7>;
+		zephyr,input-positive = <MCUX_LPADC_CH4B>;
+		/delete-property/ zephyr,differential;
+	};
+};
+

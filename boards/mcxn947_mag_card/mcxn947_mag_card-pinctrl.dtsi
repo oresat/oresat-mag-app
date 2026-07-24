@@ -74,7 +74,7 @@
 	};
 
 /* MT_X_I_SENSE */
-	pinmux_lpadc1: pinmux_lpadc1 {
+	pinmux_lpadc1_0: pinmux_lpadc1_0 {
 		group0 {
 			pinmux = <ADC1_A0_PIO4_4>;
 			slew-rate = "fast";

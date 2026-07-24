@@ -49,7 +49,7 @@
 #include "windowed_average.h"
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(imu, CONFIG_SENSOR_LOG_LEVEL);
+LOG_MODULE_REGISTER(imu_bmi, CONFIG_SENSOR_LOG_LEVEL);
 
 #define IMU_DEVICE_ADDR 0x68 // I2C 7 bit address
 #define IMU_DEVICE_ADDR_ALT 0x69 // I2C 7 bit address
@@ -107,77 +107,8 @@ static bool reset_cal;
 
 K_SEM_DEFINE(imu_data_ready, 0, 1);
 
-static int check_i2c_device_presence(uint8_t addr)
-{
-	struct i2c_msg msgs[1];
-	uint8_t dst;
-
-	/* Send the address to read from */
-	msgs[0].buf = &dst;
-	msgs[0].len = 0U;
-	msgs[0].flags = I2C_MSG_WRITE | I2C_MSG_STOP;
-	if (i2c_transfer(i2c, &msgs[0], 1, addr) == 0) {
-		LOG_DBG("Device detected on i2c bus at 0x%02x", addr);
-		return 0;
-	} else {
-		LOG_DBG("Device NOT detected on i2c bus at 0x%02x", addr);
-		return -ENODEV;
-	}
-}
-
-static int imu_write_reg(uint16_t full_addr, uint8_t val)
-{
-	int ret;
-	uint8_t bank = full_addr >> 8;
-	uint8_t addr = full_addr & 0x0ff;
-
-	if (bank != prev_bank) {
-		ret = i2c_reg_write_byte(i2c, imu_addr, REG_BANK_SEL, bank);
-		if (ret < 0) {
-			LOG_ERR("Unable to write IMU bank register: %d", ret);
-			return ret;
-		}
-		prev_bank = bank;
-	}
-
-	ret = i2c_reg_write_byte(i2c, imu_addr, addr, val);
-	if (ret < 0) {
-		LOG_ERR("Unable to write IMU register bank %u, addr 0x%02x, data 0x%02x: %d",
-				bank, addr, val, ret);
-	}
-	return ret;
-}
-
-static int imu_read_reg(uint16_t full_addr, uint8_t *buf)
-{
-	int ret;
-	uint8_t bank = full_addr >> 8;
-	uint8_t addr = full_addr & 0x0ff;
-
-	if (bank != prev_bank) {
-		ret = i2c_reg_write_byte(i2c, imu_addr, REG_BANK_SEL, bank);
-		if (ret < 0) {
-			LOG_ERR("Unable to write IMU bank register: %d", ret);
-			return ret;
-		}
-		prev_bank = bank;
-	}
-
-	ret = i2c_reg_read_byte(i2c, imu_addr, addr, buf);
-	if (ret < 0) {
-		LOG_ERR("Unable to read IMU register bank %u, addr 0x%02x: %d",
-				bank, addr, ret);
-	}
-	return ret;
-}
-
 bool is_imu_ready(void)
 {
-	if (!imu_is_ready) {
-		char state_str[80] = {0};
-		k_thread_state_str(imu_id, state_str, sizeof(state_str) - 1);
-		LOG_ERR("IMU thread state: %s", state_str);
-	}
 	return imu_is_ready;
 }
 
@@ -250,13 +181,13 @@ static int store_gyro_calibration(int16_t *gxcal, int16_t *gycal, int16_t *gzcal
 
 static int reset_imu(void)
 {
-	int ret;
+	int ret = 0;
 	int attempt;
 	uint8_t int_status;
 	int rec_count;
 
 	rec_count = load_recovery_count();
-
+#if 0
 	for (attempt = 1; attempt < SOFT_RESET_RETRIES; attempt++) {
 		ret = imu_write_reg(REG_DEVICE_CONFIG, BIT_SOFT_RESET_CONFIG);
 		k_msleep(10 * attempt); /* must sleep > 1 ms before any other register access */
@@ -309,7 +240,7 @@ static int reset_imu(void)
 		}
 		LOG_INF("IMU has been reset.");
 	}
-
+#endif
 	return ret;
 }
 
@@ -335,6 +266,7 @@ static int init_imu(void)
 	}
 
 	imu_is_ready = false;
+#if 0
 	i2c = DEVICE_DT_GET(DT_NODELABEL(flexcomm0_lpi2c0)); //i2c-0));
 
 	if (!device_is_ready(i2c)) {
@@ -372,6 +304,9 @@ static int init_imu(void)
 	LOG_INF("IMU detected.");
 	imu_is_ready = true;
 	return reset_imu();
+#else
+	return false;
+#endif
 }
 
 /**
@@ -433,9 +368,10 @@ static int init_imu(void)
  */
 static int configure_imu(void)
 {
-	int ret;
+	int ret = 0;
 
 	LOG_INF("Configuring IMU...");
+#if 0
 	/* Enable gyro in low noise mode */
 	ret = imu_write_reg(REG_PWR_MGMT0, (BIT_GYRO_MODE_LNM << 2));
 	k_msleep(1); /* must sleep > 200 us before any other register access */
@@ -516,16 +452,18 @@ static int configure_imu(void)
 		LOG_ERR("Error setting gyro aaf: %d", ret);
 		return ret;
 	}
+#endif
 	LOG_INF("Configuration complete.");
 	return ret;
 }
 
 static int read_gyro_data(int16_t *x, int16_t *y, int16_t *z)
 {
-	int ret;
+	int ret = 0;
 	uint8_t b0;
 	uint8_t b1;
 
+#if 0
 	ret = imu_read_reg(REG_GYRO_DATA_X0, &b0);
 	if (ret < 0) {
 		LOG_ERR("Error reading X0: %d", ret);
@@ -561,16 +499,17 @@ static int read_gyro_data(int16_t *x, int16_t *y, int16_t *z)
 		return ret;
 	}
 	*z = (uint16_t)b0 | (((uint16_t)b1) << 8);
-
+#endif
 	return ret;
 }
 
 static int read_temp_data(int16_t *temp)
 {
-	int ret;
+	int ret = 0;
 	uint8_t b0;
 	uint8_t b1;
 
+#if 0
 	ret = imu_read_reg(REG_TEMP_DATA0, &b0);
 	if (ret < 0) {
 		LOG_ERR("Error reading TEMP0: %d", ret);
@@ -582,6 +521,7 @@ static int read_temp_data(int16_t *temp)
 		return ret;
 	}
 	*temp = (uint16_t)b0 | (((uint16_t)b1) << 8);
+#endif
 	return ret;
 }
 
@@ -673,11 +613,15 @@ static void handle_imu(void *p1, void *p2, void *p3)
 			samples = 0;
 		}
 		for (i = 0; i < DATA_READY_TRIES; i++) {
+#if 0
 			err = imu_read_reg(REG_INT_STATUS, &int_status);
 			if (!err && (int_status & BIT_DATA_RDY_INT)) {
 				break;
 			}
 			k_msleep(1);
+#else
+			break;
+#endif
 		}
 		if (err) {
 			LOG_ERR("Timeout waiting for data ready");
@@ -749,4 +693,5 @@ SHELL_CMD_ARG_REGISTER(gyrocal, NULL,  SHELL_HELP("Calibrate the gyroscope", "gy
 #endif
 
 K_THREAD_DEFINE(imu_id, IMU_THREAD_STACK_SIZE, handle_imu, NULL, NULL, NULL, IMU_THREAD_PRIORITY, 0, 0);
+
 
