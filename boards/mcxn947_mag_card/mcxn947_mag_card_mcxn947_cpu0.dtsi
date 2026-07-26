@@ -69,9 +69,12 @@
 		mt-en-gpios = <&gpio4 16 0>;		/* open drain out */
 		n-mt-en-fault-gpios = <&gpio4 13 0>;/* in */
 		n-mt-stby-rst-gpios = <&gpio4 12 0>;/* out */
-		mt-z-phase-gpios = <&gpio4 7 0>;	/* out */
-		mt-y-phase-gpios = <&gpio4 6 0>;	/* out */
-		mt-x-phase-gpios = <&gpio4 5 0>;	/* out */
+		mt-z-phase-gpios = <&gpio4 7 GPIO_ACTIVE_LOW>;	/* out */
+		mt-y-phase-gpios = <&gpio4 6 GPIO_ACTIVE_LOW>;	/* out */
+		mt-x-phase-gpios = <&gpio4 5 GPIO_ACTIVE_LOW>;	/* out */
+		hw-rev-bit-0-gpios = <&gpio0 21 0>; /* in -- enable pull up in init code */
+		hw-rev-bit-1-gpios = <&gpio0 22 0>; /* in -- enable pull up in init code */
+		hw-rev-bit-2-gpios = <&gpio0 23 0>; /* in -- enable pull up in init code */
 	};
 
 	zephyr,user {
@@ -79,6 +82,7 @@
 		dac-channel-id = <0>;
 		dac-resolution = <12>;
 		status = "okay";
+		r58-ohms = <237>; /* DAC output voltage divider numerator; denominator is 1K */
 	};
 };
 
@@ -95,14 +99,14 @@
 	rm3100a: rm3100@20 {
 			compatible = "pni,rm3100";
 			reg = <0x20>;
-			odr = <RM3100_DT_ODR_600>;
+			odr = <RM3100_DT_ODR_300>;
 			status = "okay";
 			zephyr,deferred-init;
 	};
 	rm3100b: rm3100@22 {
 			compatible = "pni,rm3100";
 			reg = <0x22>;
-			odr = <RM3100_DT_ODR_600>;
+			odr = <RM3100_DT_ODR_300>;
 			status = "okay";
 			zephyr,deferred-init;
 	};
@@ -200,7 +204,7 @@
 };
 
 &edma0 {
-	status = "disabled";
+	status = "okay";
 };
 
 &wwdt0 {
@@ -265,11 +269,16 @@
 };
 
 &lpadc0 {
-	pinctrl-names = "default";
 	pinctrl-0 = <&pinmux_lpadc0_0>, <&pinmux_lpadc0_1>;
+	pinctrl-names = "default";
+
 	#address-cells = <1>;
 	#size-cells = <0>;
 	status = "okay";
+
+	voltage-ref = < 0x0 >;
+   power-level = < 0x01 >;
+
 	lpadc0_0: channel@0 { /* Z */
 		reg = <0>;
 		zephyr,gain = "ADC_GAIN_1";
@@ -302,6 +311,9 @@
 	#address-cells = <1>;
 	#size-cells = <0>;
 	status = "okay";
+
+	voltage-ref = < 0x0 >;
+   power-level = < 0x01 >;
 
 	lpadc1_0: channel@0 { /* X */
 		reg = <0>;

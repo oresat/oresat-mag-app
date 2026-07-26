@@ -58,7 +58,6 @@ static void handle_can(void *p1, void *p2, void *p3)
 {
 	int err;
 	uint16_t timeout;
-	uint16_t wr_timeout_count;
 	uint32_t elapsed = 0U;
 	int64_t timestamp;
 	CO_NMT_reset_cmd_t reset = CO_RESET_NOT;
@@ -125,7 +124,6 @@ static void handle_can(void *p1, void *p2, void *p3)
 
 	while (reset != CO_RESET_APP) {
 		elapsed = 0U;
-		wr_timeout_count = 0U;
 
 		err = CO_init(&can, node_id, CAN_BITRATE);
 		if (err != CO_ERROR_NO) {

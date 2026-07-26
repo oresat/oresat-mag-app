@@ -46,6 +46,11 @@ LOG_MODULE_REGISTER(magnetometer, CONFIG_SENSOR_LOG_LEVEL);
 /* === GPIO data === */
 #define BP_NODE DT_NODELABEL(maggpios)
 
+// Copied from zephyr/dsp/utils.h (you end up needing to pull in a bunch of DSP stuff, including a library,
+// simply to access this macro, which is overkill.
+// Removed the "Z_" prefix t prevent conflicts in the future.
+#define SHIFT_Q31_TO_F32(src, m) ((float32_t)(((int64_t)src) << m) / (float32_t)(1U << 31))
+
 static const struct gpio_dt_spec n_mag_en = GPIO_DT_SPEC_GET(BP_NODE, n_mag_en_gpios);
 static const struct gpio_dt_spec n_mag_fault = GPIO_DT_SPEC_GET(BP_NODE, n_mag_fault_gpios);
 static const struct gpio_dt_spec mag_ready = GPIO_DT_SPEC_GET(BP_NODE, mag_ready_gpios);
@@ -58,34 +63,6 @@ extern const k_tid_t mag_id;
 
 static bool mag_0_good;
 static bool mag_1_good;
-
-#if 0
-// FROM CHIBIOS CODE:
-typedef enum {
-	EC_MAG_0_MZ_1 = 0,
-	EC_MAG_1_MZ_2,
-	EC_MAG_2_PZ_1,
-	EC_MAG_3_PZ_2,
-	EC_MAG_NONE,
-} end_card_magnetometoer_t;
-
-typedef struct {
-	volatile bool is_initialized;
-	volatile bool is_working;
-} magnetometer_data_struct_t;
-
-typedef struct  {
-	bmi088_accelerometer_sample_t accl_data;
-	bmi088_gyro_sample_t gyro_sample;
-	int16_t temp_c;
-
-	mt_pwm_phase_data_t mt_pwm_data[3];
-
-	magnetometer_data_struct_t magetometer_data[4];
-} adcs_data_t;
-
-adcs_data_t g_adcs_data;
-#endif
 
 //----------------------------------------------------------------------
 // - SECTION - routines
@@ -198,9 +175,8 @@ int init_mag(void)
 	ret = device_init(rm3100a_dev);
 	if (ret < 0) {
 		LOG_ERR("Error initializing rm3100a device driver: %d", ret);
-		return ret;
-	}
-	if (check_rm3100_sensor(rm3100a_dev) == NULL) {
+		mag_0_good = false;
+	} else if (check_rm3100_sensor(rm3100a_dev) == NULL) {
 		LOG_ERR("Could not find RM3100 magnetometer instance 'a'");
 		ret = -ENODEV;
 		mag_0_good = false;
@@ -225,16 +201,30 @@ int init_mag(void)
 	return ret;
 }
 
-int get_mag_reading(int mag_num, int16_t *x, int16_t *y, int16_t *z)
+int get_mag_reading(int mag_num, int32_t *x, int32_t *y, int32_t *z)
 {
 	if (mag_num >= NUM_MAGS) {
 		return -EINVAL; // we don't support that one yet
 	}
+	/*
+	The 32 bit value is shifted by the shift amount, but what that means in
+	practical terms is hard to figure out. See:
+	zephyr/drivers/sensor/pni/rm3100/rm3100_decoder.c line 116 (rm3100_convert_raw_to_q31)
+	with the ODR value set in mcxn947_mag_card_mcxn947_cpu0.dtsi, which sets odr to 300 Hz.
+	This means the decoder fn above uses shift = 11 and divider = 75 (uT per LSB).
+	Further, the decoder scales the data (micro_tesla_scaled) then divides by 100
+	to get gauss_scaled, which is the raw output value.
+	To extract the integer portion in gauss, Zephyr samples such as 
+	zephyr/sensors/sample/stream_fifo/src/main.c use a series of macros:
+	PRIsensor_q31_data_arg() from zephyr/include/zephyr/drivers/sensor_data_types.h, which then
+	uses macros from zephyr/include/zephyr/dsp/print_format.h: PRIq_arg() etc.
 
-	// TODO: check if the range returned from the driver can go above 16 bits
-	*x = (int16_t)mag_data[mag_num].readings[0].x;
-	*y = (int16_t)mag_data[mag_num].readings[0].y;
-	*z = (int16_t)mag_data[mag_num].readings[0].z;
+	What we want is to convert the reading to milligauss.
+	*/
+
+	*x = (int32_t)(SHIFT_Q31_TO_F32(mag_data[mag_num].readings[0].x, mag_data[mag_num].shift) * 1000.0f);
+	*y = (int32_t)(SHIFT_Q31_TO_F32(mag_data[mag_num].readings[0].y, mag_data[mag_num].shift) * 1000.0f);
+	*z = (int32_t)(SHIFT_Q31_TO_F32(mag_data[mag_num].readings[0].z, mag_data[mag_num].shift) * 1000.0f);
 
 	return 0;
 }
@@ -283,9 +273,9 @@ static void handle_mag(void *p1, void *p2, void *p3)
 					break;
 			}
 
-			LOG_DBG("Decoding mag 0");
+			LOG_DBG("Decoding mag 0 into plus Z mag 1");
 			decoder->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_XYZ, 0},
-											&mag_fit, 1, &mag_data[0]);
+											&mag_fit, 1, &mag_data[EC_MAG_0_PZ_1]);
 		}
 
 //------------------------------------------------------
@@ -311,9 +301,9 @@ static void handle_mag(void *p1, void *p2, void *p3)
 					break;
 			}
 
-			LOG_DBG("Decoding mag 1");
+			LOG_DBG("Decoding mag 1 into plus Z mag 2");
 			decoder_b->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_XYZ, 0},
-											&mag_fit_b, 1, &mag_data[1]);
+											&mag_fit_b, 1, &mag_data[EC_MAG_1_PZ_2]);
 		}
 #endif
 

@@ -62,7 +62,7 @@ config IMU
 	help
 	  Enable the IMU handling.
 
-config MAG_TORQUERS
+config MAGNETORQUERS
 	bool "Enable magetorquer control"
 	default y
 	select DAC_INTF
@@ -70,6 +70,17 @@ config MAG_TORQUERS
 	select PWM_INTF
 	help
 	  Enable the driving the magnetorquers from CAN requests.
+
+	if MAGNETORQUERS && SHELL
+
+	   config MAGNETORQUER_EXPLORE
+		   bool "Enable interaction with target_uA or PWM while monitoring current."
+		   help
+			 If The shell is also enabled, provide interactive means to experiment
+			 with various target currents or pwm output, while onboard ADC
+			 current measurements provide feedback.
+
+	endif	# MAGNETORQUERS
 
 
 config CAN_INTF
