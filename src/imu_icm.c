@@ -620,6 +620,14 @@ void get_gyro_data(int16_t *x, int16_t *y, int16_t *z, int16_t *temp)
 	*temp = gtemp;
 }
 
+void get_accel_data(int16_t *x, int16_t *y, int16_t *z)
+{
+	// not supported in this temporary implementation
+	*x = 0;
+	*y = 0;
+	*z = 0;
+}
+
 static void handle_imu(void *p1, void *p2, void *p3)
 {
 	int err;

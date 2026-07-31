@@ -356,14 +356,13 @@ static void print_debug_output(void) {
 		LOG_DBG( "  CO_OD_RAM.gyroscope.yaw_rate_raw = %d", CO_OD_RAM.gyroscope.yaw_rate_raw);
 		LOG_DBG( "  CO_OD_RAM.gyroscope.roll_rate_raw = %d", CO_OD_RAM.gyroscope.roll_rate_raw);
 
-#if 0 // current driver for the IMU does not support the accelerometer
 		LOG_DBG( "  CO_OD_RAM.accelerometer.x = %d", CO_OD_RAM.accelerometer.x);
 		LOG_DBG( "  CO_OD_RAM.accelerometer.y = %d", CO_OD_RAM.accelerometer.y);
 		LOG_DBG( "  CO_OD_RAM.accelerometer.z = %d", CO_OD_RAM.accelerometer.z);
 		LOG_DBG( "  CO_OD_RAM.accelerometer.x_raw = %d", CO_OD_RAM.accelerometer.X_raw);
 		LOG_DBG( "  CO_OD_RAM.accelerometer.y_raw = %d", CO_OD_RAM.accelerometer.Y_raw);
 		LOG_DBG( "  CO_OD_RAM.accelerometer.z_raw = %d", CO_OD_RAM.accelerometer.Z_raw);
-#endif
+
 		LOG_DBG( "  CO_OD_RAM.temperature = %d", CO_OD_RAM.temperature);
 
 		LOG_DBG( "  CO_OD_RAM.magnetorquer_current_x.current_setpoint = %d", CO_OD_RAM.magnetorquer.current_x_setpoint);
@@ -519,6 +518,30 @@ static int get_mag_readings(three_axis_data *axes)
 	}
 
 	return err;
+}
+
+static int get_accel_readings(three_axis_data *axes, int16_t *temp_data)
+{
+	int16_t ax;
+	int16_t ay;
+	int16_t az;
+
+	// ax/y/z are in milli-Gs/second
+	get_accel_data(&ax,
+				  &ay,
+				  &az,
+				  temp_data);
+
+	// correct the orientation to be in the spacecraft frame of reference,
+	// not the sensor IC frame of reference
+	// sensor +x is satellite +y
+	// sensor -y is satellite +x
+	// sensor +z is satellite +z
+	axes->x = -ay;
+	axes->y = ax;
+	axes->z = az;
+
+	return 0;
 }
 
 static int get_gyro_readings(three_axis_data *axes, int16_t *temp_data)
@@ -852,6 +875,11 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 	LOG_INF("Starting magnetorquer loop");
 	for (;;) {
 		iterations++;
+
+		err = get_accel_readings(&g_adcs_data.accl_data);
+		if (err) {
+			LOG_WRN("Error reading accel data: %d", err);
+		}
 
 		err = get_gyro_readings(&g_adcs_data.gyro_data, &g_adcs_data.temp_data);
 		if (err) {
