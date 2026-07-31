@@ -65,6 +65,9 @@ LOG_MODULE_REGISTER(imu_bmi, CONFIG_SENSOR_LOG_LEVEL);
 #define IMU_ODR 100 // Hz
 #define DEBUG_PRINT_PERIOD  100 // 1s
 
+#define RAW_ACCEL_OUT_SCALE 1
+#define RAW_ACCEL_UNIT_SCALE 1
+
 // 15.625 degrees / second full scale range
 #define GYRO_FULL_SCALE_RANGE_BIT BIT_GYRO_UI_FS_15_625
 // in units of LSB / (degree/s) == (32767 / 15.625) = 2097 counts / degree / second
@@ -77,12 +80,20 @@ LOG_MODULE_REGISTER(imu_bmi, CONFIG_SENSOR_LOG_LEVEL);
 #define HIST_LEN 10
 #endif
 
+static int32_t ax_hist_buffer[HIST_LEN];
+static wnd_avg_store ax_hist;
+static int32_t ay_hist_buffer[HIST_LEN];
+static wnd_avg_store ay_hist;
+static int32_t az_hist_buffer[HIST_LEN];
+static wnd_avg_store az_hist;
+
 static int32_t gx_hist_buffer[HIST_LEN];
 static wnd_avg_store gx_hist;
 static int32_t gy_hist_buffer[HIST_LEN];
 static wnd_avg_store gy_hist;
 static int32_t gz_hist_buffer[HIST_LEN];
 static wnd_avg_store gz_hist;
+
 static int32_t t_hist_buffer[HIST_LEN];
 static wnd_avg_store t_hist;
 
@@ -95,15 +106,17 @@ static bool imu_is_ready;
 #define IMU_THREAD_PRIORITY 0
 extern const k_tid_t imu_id;
 
-static int16_t gx_cal = 0; // offset when unit is not rotating
-static int16_t gy_cal = 0;
-static int16_t gz_cal = 0;
-static int16_t gx_raw = 0;
-static int16_t gy_raw = 0;
-static int16_t gz_raw = 0;
-static int16_t gtemp = 0;
+static int16_t a_cal[3]; // offset when unit is not accelerating
+static int16_t a_raw[3];
+
+static int16_t g_cal[3]; // offset when unit is not rotating
+static int16_t g_raw[3];
+
+static int16_t gtemp;
 
 static bool reset_cal;
+
+const struct device *const dev = DEVICE_DT_GET_ONE(bosch_bmi270);
 
 K_SEM_DEFINE(imu_data_ready, 0, 1);
 
@@ -140,7 +153,7 @@ static int store_recovery_count(uint8_t recovery_count)
 	return rc;
 }
 
-static void load_gyro_calibration(int16_t *gxcal, int16_t *gycal, int16_t *gzcal)
+static void load_gyro_calibration(int16_t *gcal)
 {
 	int rc1;
 	int rc2;
@@ -148,9 +161,9 @@ static void load_gyro_calibration(int16_t *gxcal, int16_t *gycal, int16_t *gzcal
 
 	settings_load();
 
-	rc1 = settings_load_one("gx_cal", (void *)gxcal, sizeof(*gxcal));
-	rc2 = settings_load_one("gy_cal", (void *)gycal, sizeof(*gycal));
-	rc3 = settings_load_one("gz_cal", (void *)gzcal, sizeof(*gzcal));
+	rc1 = settings_load_one("gx_cal", (void *)&gcal[0], sizeof(*gcal));
+	rc2 = settings_load_one("gy_cal", (void *)&gcal[1], sizeof(*gcal));
+	rc3 = settings_load_one("gz_cal", (void *)&gcal[2], sizeof(*gcal));
 
 	if (rc1 || rc2 || rc3) {
 		LOG_WRN("No gyroscope calibration found in settings. Rebuild with shell and run gyrocal.");
@@ -158,19 +171,19 @@ static void load_gyro_calibration(int16_t *gxcal, int16_t *gycal, int16_t *gzcal
 }
 
 #if defined(CONFIG_SHELL)
-static int store_gyro_calibration(int16_t *gxcal, int16_t *gycal, int16_t *gzcal)
+static int store_gyro_calibration(int16_t *gcal)
 {
 	int rc;
 
-	rc = settings_save_one("gx_cal", (void *)gxcal, sizeof(*gxcal));
+	rc = settings_save_one("gx_cal", (void *)&gcal[0], sizeof(*gcal));
 	if (rc < 0) {
 		LOG_WRN("Error saving gx_cal from settings: %d", rc);
 	}
-	rc = settings_save_one("gy_cal", (void *)gycal, sizeof(*gycal));
+	rc = settings_save_one("gy_cal", (void *)&gcal[1], sizeof(*gcal));
 	if (rc < 0) {
 		LOG_WRN("Error saving gy_cal from settings: %d", rc);
 	}
-	rc = settings_save_one("gz_cal", (void *)gzcal, sizeof(*gzcal));
+	rc = settings_save_one("gz_cal", (void *)&gcal[2], sizeof(*gcal));
 	if (rc < 0) {
 		LOG_WRN("Error saving gz_cal from settings: %d", rc);
 	}
@@ -248,15 +261,27 @@ static int init_imu(void)
 {
 	int ret;
 
-	ret = init_windowed_average(&gx_hist, gx_hist_buffer, HIST_LEN, "x");
+	ret = init_windowed_average(&ax_hist, ax_hist_buffer, HIST_LEN, "ax");
 	if (ret) {
 		return ret;
 	}
-	ret = init_windowed_average(&gy_hist, gy_hist_buffer, HIST_LEN, "y");
+	ret = init_windowed_average(&ay_hist, ay_hist_buffer, HIST_LEN, "ay");
 	if (ret) {
 		return ret;
 	}
-	ret = init_windowed_average(&gz_hist, gz_hist_buffer, HIST_LEN, "z");
+	ret = init_windowed_average(&az_hist, az_hist_buffer, HIST_LEN, "az");
+	if (ret) {
+		return ret;
+	}
+	ret = init_windowed_average(&gx_hist, gx_hist_buffer, HIST_LEN, "gx");
+	if (ret) {
+		return ret;
+	}
+	ret = init_windowed_average(&gy_hist, gy_hist_buffer, HIST_LEN, "gy");
+	if (ret) {
+		return ret;
+	}
+	ret = init_windowed_average(&gz_hist, gz_hist_buffer, HIST_LEN, "gz");
 	if (ret) {
 		return ret;
 	}
@@ -266,47 +291,16 @@ static int init_imu(void)
 	}
 
 	imu_is_ready = false;
-#if 0
-	i2c = DEVICE_DT_GET(DT_NODELABEL(flexcomm0_lpi2c0)); //i2c-0));
 
-	if (!device_is_ready(i2c)) {
-		LOG_ERR("I2C bus is not ready");
-			return -ENODEV;
+	if (!device_is_ready(dev)) {
+		LOG_ERR("IMU %s is not ready", dev->name);
+		return -ENODEV;
 	}
 
-	if (check_i2c_device_presence(IMU_DEVICE_ADDR) == 0) {
-		LOG_INF("Device detected on i2c bus at 0x%02x", IMU_DEVICE_ADDR);
-		imu_addr = IMU_DEVICE_ADDR;
-	} else {
-		LOG_INF("Device NOT detected on i2c bus at 0x%02x", IMU_DEVICE_ADDR);
-		if (check_i2c_device_presence(IMU_DEVICE_ADDR_ALT) == 0) {
-			LOG_INF("Device detected on i2c bus at 0x%02x", IMU_DEVICE_ADDR_ALT);
-			imu_addr = IMU_DEVICE_ADDR_ALT;
-		} else {
-			LOG_INF("Device NOT detected on i2c bus at 0x%02x", IMU_DEVICE_ADDR_ALT);
-			LOG_ERR("No device found at either address");
-			return -ENODEV;
-		}
-	}
-
-	uint8_t buf = 0;
-
-	ret = imu_read_reg(REG_WHO_AM_I, &buf);
-	if (ret < 0) {
-		LOG_ERR("Error reading IMU WHOAMI register: %d", ret);
-		return ret;
-	}
-
-	if (buf != WHO_AM_I_ICM42688) {
-		LOG_ERR("WHOAMI register returned 0x%02x, not 0x%02x", buf, WHO_AM_I_ICM42688);
-		return -ENXIO;
-	}
 	LOG_INF("IMU detected.");
+
 	imu_is_ready = true;
 	return reset_imu();
-#else
-	return false;
-#endif
 }
 
 /**
@@ -371,7 +365,55 @@ static int configure_imu(void)
 	int ret = 0;
 
 	LOG_INF("Configuring IMU...");
-#if 0
+
+#if 1
+	struct sensor_value full_scale;
+	struct sensor_value sampling_freq;
+	struct sensor_value oversampling;
+
+	/* Setting scale in G, due to loss of precision if the SI unit m/s^2
+	 * is used
+	 */
+	full_scale.val1 = 2;			/* G */
+	full_scale.val2 = 0;
+	sampling_freq.val1 = 100;   	/* Hz. Performance mode */
+	sampling_freq.val2 = 0;
+	oversampling.val1 = 1;  		/* Normal mode */
+	oversampling.val2 = 0;
+
+	sensor_attr_set(dev, SENSOR_CHAN_ACCEL_XYZ, SENSOR_ATTR_FULL_SCALE,
+			&full_scale);
+	sensor_attr_set(dev, SENSOR_CHAN_ACCEL_XYZ, SENSOR_ATTR_OVERSAMPLING,
+			&oversampling);
+	/* Set sampling frequency last as this also sets the appropriate
+	 * power mode. If already sampling, change to 0.0Hz before changing
+	 * other attributes
+	 */
+	sensor_attr_set(dev, SENSOR_CHAN_ACCEL_XYZ,
+			SENSOR_ATTR_SAMPLING_FREQUENCY,
+			&sampling_freq);
+
+	/* Setting scale in degrees/s to match the sensor scale */
+	full_scale.val1 = 500;  		/* dps */
+	full_scale.val2 = 0;
+	sampling_freq.val1 = 100;   	/* Hz. Performance mode */
+	sampling_freq.val2 = 0;
+	oversampling.val1 = 1;  		/* Normal mode */
+	oversampling.val2 = 0;
+
+	sensor_attr_set(dev, SENSOR_CHAN_GYRO_XYZ, SENSOR_ATTR_FULL_SCALE,
+			&full_scale);
+	sensor_attr_set(dev, SENSOR_CHAN_GYRO_XYZ, SENSOR_ATTR_OVERSAMPLING,
+			&oversampling);
+	/* Set sampling frequency last as this also sets the appropriate
+	 * power mode. If already sampling, change sampling frequency to
+	 * 0.0Hz before changing other attributes
+	 */
+	sensor_attr_set(dev, SENSOR_CHAN_GYRO_XYZ,
+			SENSOR_ATTR_SAMPLING_FREQUENCY,
+			&sampling_freq);
+
+#else
 	/* Enable gyro in low noise mode */
 	ret = imu_write_reg(REG_PWR_MGMT0, (BIT_GYRO_MODE_LNM << 2));
 	k_msleep(1); /* must sleep > 200 us before any other register access */
@@ -457,49 +499,31 @@ static int configure_imu(void)
 	return ret;
 }
 
-static int read_gyro_data(int16_t *x, int16_t *y, int16_t *z)
+static int read_accel_data(int16_t *aval)
 {
-	int ret = 0;
-	uint8_t b0;
-	uint8_t b1;
+	struct sensor_value accel[3];
+	int ret;
 
-#if 0
-	ret = imu_read_reg(REG_GYRO_DATA_X0, &b0);
-	if (ret < 0) {
-		LOG_ERR("Error reading X0: %d", ret);
-		return ret;
+	ret = sensor_channel_get(dev, SENSOR_CHAN_ACCEL_XYZ, accel);
+	if (!ret) {
+		aval[0] = (int16_t)accel[0].val1;
+		aval[1] = (int16_t)accel[1].val1;
+		aval[2] = (int16_t)accel[2].val1;
 	}
-	ret = imu_read_reg(REG_GYRO_DATA_X1, &b1);
-	if (ret < 0) {
-		LOG_ERR("Error reading X1: %d", ret);
-		return ret;
-	}
-	*x = (uint16_t)b0 | (((uint16_t)b1) << 8);
+	return ret;
+}
 
-	ret = imu_read_reg(REG_GYRO_DATA_Y0, &b0);
-	if (ret < 0) {
-		LOG_ERR("Error reading Y0: %d", ret);
-		return ret;
-	}
-	ret = imu_read_reg(REG_GYRO_DATA_Y1, &b1);
-	if (ret < 0) {
-		LOG_ERR("Error reading Y1: %d", ret);
-		return ret;
-	}
-	*y = (uint16_t)b0 | (((uint16_t)b1) << 8);
+static int read_gyro_data(int16_t *gval)
+{
+	struct sensor_value gyro[3];
+	int ret;
 
-	ret = imu_read_reg(REG_GYRO_DATA_Z0, &b0);
-	if (ret < 0) {
-		LOG_ERR("Error reading Z0: %d", ret);
-		return ret;
+	ret = sensor_channel_get(dev, SENSOR_CHAN_GYRO_XYZ, gyro);
+	if (!ret) {
+		gval[0] = (int16_t)gyro[0].val1;
+		gval[1] = (int16_t)gyro[1].val1;
+		gval[2] = (int16_t)gyro[2].val1;
 	}
-	ret = imu_read_reg(REG_GYRO_DATA_Z1, &b1);
-	if (ret < 0) {
-		LOG_ERR("Error reading Z1: %d", ret);
-		return ret;
-	}
-	*z = (uint16_t)b0 | (((uint16_t)b1) << 8);
-#endif
 	return ret;
 }
 
@@ -509,38 +533,35 @@ static int read_temp_data(int16_t *temp)
 	uint8_t b0;
 	uint8_t b1;
 
-#if 0
-	ret = imu_read_reg(REG_TEMP_DATA0, &b0);
-	if (ret < 0) {
-		LOG_ERR("Error reading TEMP0: %d", ret);
-		return ret;
-	}
-	ret = imu_read_reg(REG_TEMP_DATA1, &b1);
-	if (ret < 0) {
-		LOG_ERR("Error reading TEMP1: %d", ret);
-		return ret;
-	}
-	*temp = (uint16_t)b0 | (((uint16_t)b1) << 8);
-#endif
+	*temp = 20;
+	// The bmi270 driver does not currently support the built-in temperature sensor
 	return ret;
 }
 
-static int process_data(int16_t *x, int16_t *y, int16_t *z, int16_t gxcal, int16_t gycal, int16_t gzcal, int16_t *temp)
+static int process_data(int16_t *a, int16_t *g, int16_t *acal, int16_t *gcal, int16_t *temp)
 {
 	int err;
-	int16_t new_x;
-	int16_t new_y;
-	int16_t new_z;
+	int16_t accel[3];
+	int16_t gyro[3];
 	int16_t new_temp;
 
-	err = read_gyro_data(&new_x, &new_y, &new_z);
+	sensor_sample_fetch(dev);
+
+	err = read_accel_data(accel);
 	if (err < 0) {
 		return err;
 	}
+	a[0] = (int16_t)update_windowed_average(&ax_hist, accel[0]) - acal[0]; // remove static offsets found during calibration
+	a[1] = (int16_t)update_windowed_average(&ay_hist, accel[1]) - acal[1];
+	a[2] = (int16_t)update_windowed_average(&az_hist, accel[2]) - acal[2];
 
-	*x = (int16_t)update_windowed_average(&gx_hist, new_x) - gx_cal; // remove static offsets found during calibration
-	*y = (int16_t)update_windowed_average(&gy_hist, new_y) - gy_cal;
-	*z = (int16_t)update_windowed_average(&gz_hist, new_z) - gz_cal;
+	err = read_gyro_data(gyro);
+	if (err < 0) {
+		return err;
+	}
+	g[0] = (int16_t)update_windowed_average(&gx_hist, gyro[0]) - gcal[0]; // remove static offsets found during calibration
+	g[1] = (int16_t)update_windowed_average(&gy_hist, gyro[1]) - gcal[1];
+	g[2] = (int16_t)update_windowed_average(&gz_hist, gyro[2]) - gcal[2];
 
 	err = read_temp_data(&new_temp);
 	if (err < 0) {
@@ -552,11 +573,20 @@ static int process_data(int16_t *x, int16_t *y, int16_t *z, int16_t gxcal, int16
 	return 0;
 }
 
+// external interface
+void get_accel_data(int16_t *x, int16_t *y, int16_t *z)
+{
+	*x = (int16_t)(ACCEL_UNIT_SCALE * a_raw[0] / RAW_ACCEL_OUT_SCALE);  // convert to 0.001 degrees / second (milli-degrees per second)
+	*y = (int16_t)(ACCEL_UNIT_SCALE * a_raw[1] / RAW_ACCEL_OUT_SCALE);
+	*z = (int16_t)(ACCEL_UNIT_SCALE * a_raw[2] / RAW_ACCEL_OUT_SCALE);
+}
+
+// external interface
 void get_gyro_data(int16_t *x, int16_t *y, int16_t *z, int16_t *temp)
 {
-	*x = (int16_t)(GYRO_UNIT_SCALE * gx_raw / RAW_GYRO_OUT_SCALE);  // convert to 0.001 degrees / second (milli-degrees per second)
-	*y = (int16_t)(GYRO_UNIT_SCALE * gy_raw / RAW_GYRO_OUT_SCALE);
-	*z = (int16_t)(GYRO_UNIT_SCALE * gz_raw / RAW_GYRO_OUT_SCALE);
+	*x = (int16_t)(GYRO_UNIT_SCALE * g_raw[0] / RAW_GYRO_OUT_SCALE);  // convert to 0.001 degrees / second (milli-degrees per second)
+	*y = (int16_t)(GYRO_UNIT_SCALE * g_raw[1] / RAW_GYRO_OUT_SCALE);
+	*z = (int16_t)(GYRO_UNIT_SCALE * g_raw[2] / RAW_GYRO_OUT_SCALE);
 	*temp = gtemp;
 }
 
@@ -581,8 +611,8 @@ static void handle_imu(void *p1, void *p2, void *p3)
 		LOG_ERR("Unable to recover i2c bus after 10 resets. Will stop trying.");
 	}
 
-	load_gyro_calibration(&gx_cal, &gy_cal, &gz_cal);
-	LOG_INF("Gyro calibration: (%d, %d, %d)", gx_cal, gy_cal, gz_cal);
+	load_gyro_calibration(&g_cal[0], &g_cal[1], &g_cal[2]);
+	LOG_INF("Gyro calibration: (%d, %d, %d)", g_cal[0], g_cal[1], g_cal[2]);
 
 	err = init_imu();
 	if (err < 0) {
@@ -603,9 +633,9 @@ static void handle_imu(void *p1, void *p2, void *p3)
 	LOG_INF("Starting imu loop");
 	for (;;) {
 		if (reset_cal) {
-			gx_cal = 0;
-			gy_cal = 0;
-			gz_cal = 0;
+			g_cal[0] = 0;
+			g_cal[1] = 0;
+			g_cal[2] = 0;
 			reset_windowed_average(&gx_hist);
 			reset_windowed_average(&gy_hist);
 			reset_windowed_average(&gz_hist);
@@ -626,7 +656,7 @@ static void handle_imu(void *p1, void *p2, void *p3)
 		if (err) {
 			LOG_ERR("Timeout waiting for data ready");
 		}
-		err = process_data(&gx_raw, &gy_raw, &gz_raw, gx_cal, gy_cal, gz_cal, &temp);
+		err = process_data(a_raw, g_raw, a_cal, g_cal, &temp);
 		if (!err) {
 			samples++;
 			if (samples > HIST_LEN) {
@@ -675,11 +705,11 @@ static int cmd_gyrocal(const struct shell *sh, size_t argc, char **argv)
 	if (err) {
 		shell_error(sh, "Error waiting for data: %d", err);
 	} else {
-		gx_cal = gx_raw;
-		gy_cal = gy_raw;
-		gz_cal = gz_raw;
-		err = store_gyro_calibration(&gx_cal, &gy_cal, &gz_cal);
-		shell_print(sh, "New calibration: (%d, %d, %d)", gx_cal, gy_cal, gz_cal);
+		g_cal[0] = g_raw[0];
+		g_cal[1] = g_raw[1];
+		g_cal[2] = g_raw[2];
+		err = store_gyro_calibration(g_cal);
+		shell_print(sh, "New calibration: (%d, %d, %d)", g_cal[0], g_cal[1], g_cal[2]);
 		if (err) {
 			shell_error(sh, "Unable to store calibration: %d", err);
 		}
@@ -693,5 +723,3 @@ SHELL_CMD_ARG_REGISTER(gyrocal, NULL,  SHELL_HELP("Calibrate the gyroscope", "gy
 #endif
 
 K_THREAD_DEFINE(imu_id, IMU_THREAD_STACK_SIZE, handle_imu, NULL, NULL, NULL, IMU_THREAD_PRIORITY, 0, 0);
-
-
