@@ -1,40 +1,48 @@
-/*
+/**
  * 2026 Q2 mcxn947_breakoutcard overlay for mag card development work
+ * 2026 Q3 add bmi270 imu
  */
 
 #include <zephyr/dt-bindings/sensor/rm3100.h>
 
 / {
-        aliases {
-                mag0 = &rm3100a;
-                mag1 = &rm3100b;
-        };
+	aliases {
+		mag0 = &rm3100a;
+		mag1 = &rm3100b;
+	};
 };
 
 &flexcomm0_lpi2c0 {
-        rm3100a: rm3100@20 {
-                compatible = "pni,rm3100";
-                reg = <0x20>;
-                odr = <RM3100_DT_ODR_600>;
-                status = "okay";
-        };
-        rm3100b: rm3100@21 {
-                compatible = "pni,rm3100";
-                reg = <0x21>;
-                odr = <RM3100_DT_ODR_600>;
-                status = "okay";
-        };
+	rm3100a: rm3100@20 {
+		compatible = "pni,rm3100";
+		reg = <0x20>;
+		odr = <RM3100_DT_ODR_600>;
+		status = "okay";
+	};
+	rm3100b: rm3100@21 {
+		compatible = "pni,rm3100";
+		reg = <0x21>;
+		odr = <RM3100_DT_ODR_600>;
+		status = "okay";
+	};
+	bmi270: bmi270@68 {
+		compatible = "bosch,bmi270";
+		reg = <0x68>;
+		status = "okay";
+		zephyr,deferred-init;
+	};
 };
 
 /delete-node/ &bme280;
 
-/* 2026-05-21 - Though 115200 is the default baud rate for MCXN947 prototype
-  or breakout board, repeat it here because Oresat Card Debug Board v3.1
-  requires this rate.  That board is pretty much always the one Oresat team
-  will use for programming and debugging given physical connector form
-  factors. */
+/** 2026-05-21 - Though 115200 is the default baud rate for MCXN947 prototype
+ * or breakout board, repeat it here because Oresat Card Debug Board v3.1
+ * requires this rate.  That board is pretty much always the one Oresat team
+ * will use for programming and debugging given physical connector form
+ * factors.
+ */
 
 &flexcomm4_lpuart4 {
-        status = "okay";
-        current-speed = <115200>;
+	status = "okay";
+	current-speed = <115200>;
 };
