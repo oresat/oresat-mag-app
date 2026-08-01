@@ -62,16 +62,15 @@ LOG_MODULE_REGISTER(imu_bmi, CONFIG_SENSOR_LOG_LEVEL);
 
 #define IMU_STARTUP_DELAY 500
 #define IMU_ITERATION_PERIOD 90 // ms -- a bit more fast than the ODR -- will wait for interrupt (polled)
+#define IMU_ACCEL_RANGE_G 2
+#define IMU_GYRO_RANGE_DPS 125
 #define IMU_ODR 100 // Hz
-#define DEBUG_PRINT_PERIOD  100 // 1s
+#define DEBUG_PRINT_PERIOD  500 // 1s
 
 #define RAW_ACCEL_OUT_SCALE 1
 #define ACCEL_UNIT_SCALE 1
 
-// 15.625 degrees / second full scale range
-#define GYRO_FULL_SCALE_RANGE_BIT BIT_GYRO_UI_FS_15_625
-// in units of LSB / (degree/s) == (32767 / 15.625) = 2097 counts / degree / second
-#define RAW_GYRO_OUT_SCALE (32767 / 15.625f)
+#define RAW_GYRO_OUT_SCALE 1
 #define GYRO_UNIT_SCALE 1000.0f // milli-degrees/second
 
 #if defined(CONFIG_SHELL) // calibration mode
@@ -103,13 +102,13 @@ static bool imu_is_ready;
 #define IMU_THREAD_PRIORITY 0
 extern const k_tid_t imu_id;
 
-static int16_t a_cal[3]; // offset when unit is not accelerating
-static int16_t a_raw[3];
+static int32_t a_cal[3]; // offset when unit is not accelerating
+static int32_t a_raw[3];
 
-static int16_t g_cal[3]; // offset when unit is not rotating
-static int16_t g_raw[3];
+static int32_t g_cal[3]; // offset when unit is not rotating
+static int32_t g_raw[3];
 
-static int16_t gtemp;
+static int32_t gtemp;
 
 static bool reset_cal;
 
@@ -150,7 +149,7 @@ static int store_recovery_count(uint8_t recovery_count)
 	return rc;
 }
 
-static void load_gyro_calibration(int16_t *gcal)
+static void load_gyro_calibration(int32_t *gcal)
 {
 	int rc1;
 	int rc2;
@@ -168,7 +167,7 @@ static void load_gyro_calibration(int16_t *gcal)
 }
 
 #if defined(CONFIG_SHELL)
-static int store_gyro_calibration(int16_t *gcal)
+static int store_gyro_calibration(int32_t *gcal)
 {
 	int rc;
 
@@ -373,14 +372,14 @@ static int configure_imu(void)
 	struct sensor_value sampling_freq;
 	struct sensor_value oversampling;
 
-	/* Setting scale in G, due to loss of precision if the SI unit m/s^2
+	/* Setting scale in g, due to loss of precision if the SI unit m/s^2
 	 * is used
 	 */
-	full_scale.val1 = 2;			/* G */
+	full_scale.val1 = IMU_ACCEL_RANGE_G;	/* G */
 	full_scale.val2 = 0;
-	sampling_freq.val1 = 100;   	/* Hz. Performance mode */
+	sampling_freq.val1 = IMU_ODR;			/* Hz. Performance mode */
 	sampling_freq.val2 = 0;
-	oversampling.val1 = 1;  		/* Normal mode */
+	oversampling.val1 = 1;					/* Normal mode */
 	oversampling.val2 = 0;
 
 	sensor_attr_set(dev, SENSOR_CHAN_ACCEL_XYZ, SENSOR_ATTR_FULL_SCALE,
@@ -396,11 +395,11 @@ static int configure_imu(void)
 			&sampling_freq);
 
 	/* Setting scale in degrees/s to match the sensor scale */
-	full_scale.val1 = 500;  		/* dps */
+	full_scale.val1 = IMU_GYRO_RANGE_DPS;	/* dps */
 	full_scale.val2 = 0;
-	sampling_freq.val1 = 100;   	/* Hz. Performance mode */
+	sampling_freq.val1 = IMU_ODR;			/* Hz. Performance mode */
 	sampling_freq.val2 = 0;
-	oversampling.val1 = 1;  		/* Normal mode */
+	oversampling.val1 = 1;					/* Normal mode */
 	oversampling.val2 = 0;
 
 	sensor_attr_set(dev, SENSOR_CHAN_GYRO_XYZ, SENSOR_ATTR_FULL_SCALE,
@@ -501,35 +500,81 @@ static int configure_imu(void)
 	return ret;
 }
 
-static int read_accel_data(int16_t *aval)
+/**
+ *  @brief convert accel value to gs
+ *
+ *  @param val_mps2 - in: driver value in meters / sec^2
+ *  @param range - configured range in gs
+ *  @retval int32_t - output value
+ */
+static int32_t channel_accel_convert(struct sensor_value *val_mps2,
+									 uint8_t range)
+{
+	/* 16 bit accelerometer. 2^15 bits represent the range in g */
+	/* Converting to g from m/s^2 */
+	int64_t out_val;
+
+	out_val = val_mps2->val1 * 1000000LL + val_mps2->val2;
+
+	// driver does this:
+	// out_val = (out_val * SENSOR_G * (int64_t) range) / INT16_MAX;
+	out_val = (out_val * INT16_MAX) / (SENSOR_G * (int64_t)range);
+
+	return out_val;
+}
+
+/**
+ *  @brief convert gyro value to degrees / sec
+ *
+ *  @param val_radians - in: driver value in radians / sec
+ *  @param range - configured range in degrees / sec
+ *  @retval int32_t - output value
+ */
+static int32_t channel_gyro_convert(struct sensor_value *val_rps,
+									uint16_t range)
+{
+	/* 16 bit gyroscope. 2^15 bits represent the range in degrees/s */
+	/* Converting to degrees/s from radians/s */
+	int64_t out_val;
+
+	out_val = val_rps->val1 * 1000000LL + val_rps->val2;
+
+	// driver does this:
+	// out_val = ((out_val * (int64_t) range * SENSOR_PI) / (180LL * INT16_MAX));
+	out_val = (out_val * 180LL * INT16_MAX) / (SENSOR_PI * (int64_t)range);
+
+	return out_val;
+}
+
+static int read_accel_data(int32_t *aval)
 {
 	struct sensor_value accel[3];
 	int ret;
 
 	ret = sensor_channel_get(dev, SENSOR_CHAN_ACCEL_XYZ, accel);
 	if (!ret) {
-		aval[0] = (int16_t)accel[0].val1;
-		aval[1] = (int16_t)accel[1].val1;
-		aval[2] = (int16_t)accel[2].val1;
+		aval[0] = channel_accel_convert(&accel[0], IMU_ACCEL_RANGE_G);
+		aval[1] = channel_accel_convert(&accel[1], IMU_ACCEL_RANGE_G);
+		aval[2] = channel_accel_convert(&accel[2], IMU_ACCEL_RANGE_G);
 	}
 	return ret;
 }
 
-static int read_gyro_data(int16_t *gval)
+static int read_gyro_data(int32_t *gval)
 {
 	struct sensor_value gyro[3];
 	int ret;
 
 	ret = sensor_channel_get(dev, SENSOR_CHAN_GYRO_XYZ, gyro);
 	if (!ret) {
-		gval[0] = (int16_t)gyro[0].val1;
-		gval[1] = (int16_t)gyro[1].val1;
-		gval[2] = (int16_t)gyro[2].val1;
+		gval[0] = channel_gyro_convert(&gyro[0], IMU_GYRO_RANGE_DPS);
+		gval[1] = channel_gyro_convert(&gyro[1], IMU_GYRO_RANGE_DPS);
+		gval[2] = channel_gyro_convert(&gyro[2], IMU_GYRO_RANGE_DPS);
 	}
 	return ret;
 }
 
-static int read_temp_data(int16_t *temp)
+static int read_temp_data(int32_t *temp)
 {
 	int ret = 0;
 
@@ -538,12 +583,12 @@ static int read_temp_data(int16_t *temp)
 	return ret;
 }
 
-static int process_data(int16_t *a, int16_t *g, int16_t *acal, int16_t *gcal, int16_t *temp)
+static int process_data(int32_t *a, int32_t *g, int32_t *acal, int32_t *gcal, int32_t *temp)
 {
 	int err;
-	int16_t accel[3] = {0};
-	int16_t gyro[3] = {0};
-	int16_t new_temp;
+	int32_t accel[3] = {0};
+	int32_t gyro[3] = {0};
+	int32_t new_temp;
 
 	sensor_sample_fetch(dev);
 
@@ -551,24 +596,24 @@ static int process_data(int16_t *a, int16_t *g, int16_t *acal, int16_t *gcal, in
 	if (err < 0) {
 		return err;
 	}
-	a[0] = (int16_t)update_windowed_average(&ax_hist, accel[0]) - acal[0]; // remove static offsets found during calibration
-	a[1] = (int16_t)update_windowed_average(&ay_hist, accel[1]) - acal[1];
-	a[2] = (int16_t)update_windowed_average(&az_hist, accel[2]) - acal[2];
+	a[0] = (int32_t)update_windowed_average(&ax_hist, accel[0]) - acal[0]; // remove static offsets found during calibration
+	a[1] = (int32_t)update_windowed_average(&ay_hist, accel[1]) - acal[1];
+	a[2] = (int32_t)update_windowed_average(&az_hist, accel[2]) - acal[2];
 
 	err = read_gyro_data(gyro);
 	if (err < 0) {
 		return err;
 	}
-	g[0] = (int16_t)update_windowed_average(&gx_hist, gyro[0]) - gcal[0]; // remove static offsets found during calibration
-	g[1] = (int16_t)update_windowed_average(&gy_hist, gyro[1]) - gcal[1];
-	g[2] = (int16_t)update_windowed_average(&gz_hist, gyro[2]) - gcal[2];
+	g[0] = (int32_t)update_windowed_average(&gx_hist, gyro[0]) - gcal[0]; // remove static offsets found during calibration
+	g[1] = (int32_t)update_windowed_average(&gy_hist, gyro[1]) - gcal[1];
+	g[2] = (int32_t)update_windowed_average(&gz_hist, gyro[2]) - gcal[2];
 
 	err = read_temp_data(&new_temp);
 	if (err < 0) {
 		return err;
 	}
 
-	*temp = (int16_t)update_windowed_average(&t_hist, new_temp);
+	*temp = (int32_t)update_windowed_average(&t_hist, new_temp);
 
 	return 0;
 }
@@ -627,7 +672,7 @@ static void handle_imu(void *p1, void *p2, void *p3)
 	int count = 0;
 	int samples = 0;
 	int i;
-	int16_t temp = 0;
+	int32_t temp = 0;
 
 	LOG_INF("Starting imu loop");
 	for (;;) {
@@ -665,7 +710,7 @@ static void handle_imu(void *p1, void *p2, void *p3)
 		}
 
 		// Temperature in Degrees Centigrade = (TEMP_DATA / 132.48) + 25
-		int16_t temp_decicentigrade = (int16_t)(((int)temp * 100) / (1325) + 250);
+		int32_t temp_decicentigrade = (int32_t)(((int)temp * 100) / (1325) + 250);
 
 		gtemp = temp_decicentigrade / 10;
 
