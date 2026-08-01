@@ -47,7 +47,7 @@ LOG_MODULE_REGISTER(magnetometer, CONFIG_SENSOR_LOG_LEVEL);
 #define BP_NODE DT_NODELABEL(maggpios)
 
 // Copied from zephyr/dsp/utils.h (you end up needing to pull in a bunch of DSP stuff, including a library,
-// simply to access this macro, which is overkill.
+// simply to access this macro, which is overkill.)
 // Removed the "Z_" prefix t prevent conflicts in the future.
 #define SHIFT_Q31_TO_F32(src, m) ((float32_t)(((int64_t)src) << m) / (float32_t)(1U << 31))
 
