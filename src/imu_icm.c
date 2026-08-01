@@ -6,8 +6,8 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/settings/settings.h>
 #include <zephyr/shell/shell.h>
-#include <canopennode.h>
-#include <CO_OD.h>
+//#include <canopennode.h>
+//#include <CO_OD.h>
 
 #include "windowed_average.h"
 #include "imu.h"

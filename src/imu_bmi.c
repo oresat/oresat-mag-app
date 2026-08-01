@@ -1,13 +1,13 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
-#include <zephyr/devicetree.h>
-#include <zephyr/drivers/i2c.h>
-#include <zephyr/sys/byteorder.h>
+//#include <zephyr/devicetree.h>
+#include <zephyr/drivers/sensor.h>
+//#include <zephyr/sys/byteorder.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/settings/settings.h>
 #include <zephyr/shell/shell.h>
-#include <canopennode.h>
-#include <CO_OD.h>
+//#include <canopennode.h>
+//#include <CO_OD.h>
 
 #include "windowed_average.h"
 #include "imu.h"
@@ -66,7 +66,7 @@ LOG_MODULE_REGISTER(imu_bmi, CONFIG_SENSOR_LOG_LEVEL);
 #define DEBUG_PRINT_PERIOD  100 // 1s
 
 #define RAW_ACCEL_OUT_SCALE 1
-#define RAW_ACCEL_UNIT_SCALE 1
+#define ACCEL_UNIT_SCALE 1
 
 // 15.625 degrees / second full scale range
 #define GYRO_FULL_SCALE_RANGE_BIT BIT_GYRO_UI_FS_15_625
@@ -97,9 +97,6 @@ static wnd_avg_store gz_hist;
 static int32_t t_hist_buffer[HIST_LEN];
 static wnd_avg_store t_hist;
 
-static const struct device *i2c;
-static uint8_t imu_addr;
-static uint8_t prev_bank;
 static bool imu_is_ready;
 
 #define IMU_THREAD_STACK_SIZE 2048
@@ -196,7 +193,6 @@ static int reset_imu(void)
 {
 	int ret = 0;
 	int attempt;
-	uint8_t int_status;
 	int rec_count;
 
 	rec_count = load_recovery_count();
@@ -291,6 +287,12 @@ static int init_imu(void)
 	}
 
 	imu_is_ready = false;
+
+	// We use deferred-init in the device tree, which means we need to manually start the driver
+	ret = device_init(dev);
+	if (ret) {
+		LOG_ERR("Error starting BMI270 driver: %d", ret);
+	}
 
 	if (!device_is_ready(dev)) {
 		LOG_ERR("IMU %s is not ready", dev->name);
@@ -530,8 +532,6 @@ static int read_gyro_data(int16_t *gval)
 static int read_temp_data(int16_t *temp)
 {
 	int ret = 0;
-	uint8_t b0;
-	uint8_t b1;
 
 	*temp = 20;
 	// The bmi270 driver does not currently support the built-in temperature sensor
@@ -541,8 +541,8 @@ static int read_temp_data(int16_t *temp)
 static int process_data(int16_t *a, int16_t *g, int16_t *acal, int16_t *gcal, int16_t *temp)
 {
 	int err;
-	int16_t accel[3];
-	int16_t gyro[3];
+	int16_t accel[3] = {0};
+	int16_t gyro[3] = {0};
 	int16_t new_temp;
 
 	sensor_sample_fetch(dev);
@@ -611,7 +611,7 @@ static void handle_imu(void *p1, void *p2, void *p3)
 		LOG_ERR("Unable to recover i2c bus after 10 resets. Will stop trying.");
 	}
 
-	load_gyro_calibration(&g_cal[0], &g_cal[1], &g_cal[2]);
+	load_gyro_calibration(g_cal);
 	LOG_INF("Gyro calibration: (%d, %d, %d)", g_cal[0], g_cal[1], g_cal[2]);
 
 	err = init_imu();
@@ -627,7 +627,6 @@ static void handle_imu(void *p1, void *p2, void *p3)
 	int count = 0;
 	int samples = 0;
 	int i;
-	uint8_t int_status;
 	int16_t temp = 0;
 
 	LOG_INF("Starting imu loop");
@@ -674,8 +673,9 @@ static void handle_imu(void *p1, void *p2, void *p3)
 			count++;
 			if (count >= (DEBUG_PRINT_PERIOD / IMU_ODR) ){
 				count = 0;
-				LOG_DBG("Ave gyro: (%d, %d, %d)", gx_raw, gy_raw, gz_raw);
-				LOG_DBG("Ave temp (dC): %d", temp_decicentigrade);
+				LOG_DBG("Ave accl: (%d, %d, %d)", a_raw[0], a_raw[1], a_raw[2]);
+				LOG_DBG("Ave gyro: (%d, %d, %d)", g_raw[0], g_raw[1], g_raw[2]);
+				LOG_DBG("Ave temp: (dC): %d", temp_decicentigrade);
 			}
 		}
 		k_msleep(IMU_ITERATION_PERIOD);

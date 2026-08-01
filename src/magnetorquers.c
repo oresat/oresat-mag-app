@@ -520,7 +520,7 @@ static int get_mag_readings(three_axis_data *axes)
 	return err;
 }
 
-static int get_accel_readings(three_axis_data *axes, int16_t *temp_data)
+static int get_accel_readings(three_axis_data *axes)
 {
 	int16_t ax;
 	int16_t ay;
@@ -529,8 +529,7 @@ static int get_accel_readings(three_axis_data *axes, int16_t *temp_data)
 	// ax/y/z are in milli-Gs/second
 	get_accel_data(&ax,
 				  &ay,
-				  &az,
-				  temp_data);
+				  &az);
 
 	// correct the orientation to be in the spacecraft frame of reference,
 	// not the sensor IC frame of reference
