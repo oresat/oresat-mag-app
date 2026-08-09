@@ -140,10 +140,38 @@ RTIO_DEFINE(ctx_b, 1, 1);
 const struct device *const rm3100a_dev = DEVICE_DT_GET(MAG0_NODE);
 const struct device *const rm3100b_dev = DEVICE_DT_GET(MAG1_NODE);
 
+
+
+// - DEV 0808 BEGION -
+
+void rm3100_test_function(char* sensor_instance)
+{
+	LOG_WRN("- DEV 0808 - called for RM3100 node instance %s", sensor_instance);
+}
+
+#define RM3100_TEST_FUNCTION(inst) \
+rm3100_test_function(STRINGIFY(inst));
+
+#define DT_DRV_COMPAT pni_rm3100
+
+void rm3100_roll_call(void) {
+DT_INST_FOREACH_STATUS_OKAY(RM3100_TEST_FUNCTION)
+}
+
+#undef DT_DRV_COMPAT
+
+// - DEV 0808 DEV -
+
+
+
 int init_mag(void)
 {
 	int ret;
 	uint32_t count = 1;
+
+	LOG_INF("- DEV 0808 - Check of device tree for RM3100 nodes . . .");
+	rm3100_roll_call();
+	LOG_INF("- DEV 0808 - Check done.");
 
 	k_msleep(500);
 	LOG_INF("Initializing magnetometers");
@@ -313,4 +341,3 @@ static void handle_mag(void *p1, void *p2, void *p3)
 }
 
 K_THREAD_DEFINE(mag_id, MAG_THREAD_STACK_SIZE, handle_mag, NULL, NULL, NULL, MAG_THREAD_PRIORITY, 0, 0);
-
