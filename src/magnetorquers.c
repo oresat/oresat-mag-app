@@ -813,13 +813,24 @@ static int init_magnetorquer(void) {
 	return err;
 }
 
+#define MAGNETORQUER_LOG_PERIOD_CYCLES 10000000
+
 static void check_magnetorquer_fault(void)
 {
 	int fault;
+	static uint32_t fault_count = 0;
+	static uint32_t sys_uptime_present = MAGNETORQUER_LOG_PERIOD_CYCLES;
+	static uint32_t sys_uptime_previous = 0;
 
 	fault = gpio_pin_get_dt(&n_mt_en_fault);
 	if (!fault) {
-		LOG_WRN("Fault on magnetorquer driver(s)!");
+		fault_count++;
+		sys_uptime_present = k_cycle_get_32();
+
+		if ((sys_uptime_present - sys_uptime_previous) >= MAGNETORQUER_LOG_PERIOD_CYCLES) {
+			LOG_WRN("Fault on magnetorquer driver(s)!");
+			sys_uptime_previous = sys_uptime_present;
+		}
 
 		// TODO: ask Andrew if this is ok to do. It wasn't in the old code.
 		// LOG_INF("Resetting magnetorquer drivers.");
