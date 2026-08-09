@@ -12,6 +12,7 @@
 #include <oresat.h>
 
 #include "can_util.h"
+#include "gpios.h"
 
 LOG_MODULE_REGISTER(can_thread, CONFIG_CAN_LOG_LEVEL);
 
@@ -23,6 +24,8 @@ LOG_MODULE_REGISTER(can_thread, CONFIG_CAN_LOG_LEVEL);
 #define CAN_THREAD_STACK_SIZE 2048
 #define CAN_THREAD_PRIORITY 0
 #define CAN_STARTUP_DELAY 250
+
+#define MAX_FAULT_PRINTS 10
 
 extern const k_tid_t can_id;
 
@@ -63,11 +66,14 @@ static void handle_can(void *p1, void *p2, void *p3)
 	CO_NMT_reset_cmd_t reset = CO_RESET_NOT;
 	struct canopen_context can = {.dev = CAN_INTERFACE};
 	uint8_t node_id = DEFAULT_NODE_ID;
+	int print_fault = 0;
 
 	k_thread_name_set(can_id, "can_thread");
 	k_sleep(K_MSEC(CAN_STARTUP_DELAY));
 
 	LOG_INF("Starting CAN thread");
+
+	init_gpios();
 
 	err = settings_subsys_init();
 	if (err) {
@@ -119,6 +125,8 @@ static void handle_can(void *p1, void *p2, void *p3)
 		__ASSERT(false, "Fatal error");
 	}
 
+	set_can_normal(); // if using a newer board, tell the TCAN337 to not be silent
+
 	LOG_INF("Starting CANopenNode (node_id=0x%02x, bitrate=%u kbps)",
 			(unsigned)node_id, (unsigned)CAN_BITRATE);
 
@@ -145,6 +153,14 @@ static void handle_can(void *p1, void *p2, void *p3)
 			timeout = 1U;
 			timestamp = k_uptime_get();
 
+			if (get_can_fault()) {
+				// should we do anything, or is it caught by CO_isError() below?
+				if (print_fault < MAX_FAULT_PRINTS) {
+					print_fault++;
+					LOG_WRN("CAN HW FAULT");
+				}
+			}
+
 			if (CO_isError(CO->em, CO_EM_CAN_TX_OVERFLOW)) {
 				CO_errorReset(CO->em, CO_EM_CAN_TX_OVERFLOW, 111);
 			}
@@ -166,10 +182,9 @@ static void handle_can(void *p1, void *p2, void *p3)
 			} else {
 				elapsed = 0U;
 			}
-
-			if (reset == CO_RESET_COMM) {
-				LOG_INF("Resetting communication");
-			}
+		}
+		if (reset == CO_RESET_COMM) {
+			LOG_INF("Resetting communication");
 		}
 	}
 
