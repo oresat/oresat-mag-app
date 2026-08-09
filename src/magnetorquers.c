@@ -22,8 +22,10 @@
 #include "pwm.h"
 #include "adc.h"
 #include "imu.h"
+#include "gpios.h"
 #include "magnetometer.h"
 #include "windowed_average.h"
+#include "magnetorquers.h"
 
 LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_DBG);
 
@@ -157,67 +159,7 @@ static char *axis_names[] = {
 	"X", "Y", "Z"
 };
 
-/* === GPIO data === */
-#define BP_NODE DT_NODELABEL(maggpios)
-
-static const struct gpio_dt_spec mt_en = GPIO_DT_SPEC_GET(BP_NODE, mt_en_gpios);
-static const struct gpio_dt_spec n_mt_en_fault = GPIO_DT_SPEC_GET(BP_NODE, n_mt_en_fault_gpios);
-static const struct gpio_dt_spec n_mt_stby_rst = GPIO_DT_SPEC_GET(BP_NODE, n_mt_stby_rst_gpios);
-static const struct gpio_dt_spec mt_x_phase = GPIO_DT_SPEC_GET(BP_NODE, mt_x_phase_gpios);
-static const struct gpio_dt_spec mt_y_phase = GPIO_DT_SPEC_GET(BP_NODE, mt_y_phase_gpios);
-static const struct gpio_dt_spec mt_z_phase = GPIO_DT_SPEC_GET(BP_NODE, mt_z_phase_gpios);
-static const struct gpio_dt_spec hw_rev_bit_0 = GPIO_DT_SPEC_GET(BP_NODE, hw_rev_bit_0_gpios);
-static const struct gpio_dt_spec hw_rev_bit_1 = GPIO_DT_SPEC_GET(BP_NODE, hw_rev_bit_1_gpios);
-static const struct gpio_dt_spec hw_rev_bit_2 = GPIO_DT_SPEC_GET(BP_NODE, hw_rev_bit_2_gpios);
-
 static int32_t control_current(const int32_t target_uA, int axis);
-
-static unsigned board_rev;
-
-/**************************************************/
-
-static int init_gpios(void)
-{
-	int ret;
-
-	// TODO: figure this out
-	// GPIO_LINE_OPEN_DRAIN gives an assertion:
-	// ASSERTION FAIL [(flags & (1 << 1)) != 0 || (flags & (1 << 2)) == 0] @ WEST_TOPDIR/zephyr/include/zephyr/drivers/gpio.h:1002
-
-	// this should be GPIO_OPEN_DRAIN, but the MCXN947 gpio driver does not support it
-	// instead, set to INPUT to float, or OUTPUT_INACTIVE to drive low
-	ret = gpio_pin_configure_dt(&mt_en, GPIO_INPUT);
-	if (ret) {
-		return ret;
-	}
-	ret = gpio_pin_configure_dt(&n_mt_en_fault, GPIO_INPUT);
-	if (ret) {
-		return ret;
-	}
-	ret = gpio_pin_configure_dt(&n_mt_stby_rst, GPIO_OUTPUT_INACTIVE);
-	if (ret) {
-		return ret;
-	}
-	// NOTE: the device tree should set the x/y/z_phase lines as active low, to fix logical-sense of the remainder of this code.
-	ret = gpio_pin_configure_dt(&mt_x_phase, GPIO_OUTPUT_INACTIVE);
-	if (ret) {
-		return ret;
-	}
-	ret = gpio_pin_configure_dt(&mt_y_phase, GPIO_OUTPUT_INACTIVE);
-	if (ret) {
-		return ret;
-	}
-	ret = gpio_pin_configure_dt(&mt_z_phase, GPIO_OUTPUT_INACTIVE);
-	if (ret) {
-		return ret;
-	}
-
-	ret = gpio_pin_configure_dt(&hw_rev_bit_0, GPIO_INPUT | GPIO_PULL_UP);
-	ret = gpio_pin_configure_dt(&hw_rev_bit_1, GPIO_INPUT | GPIO_PULL_UP);
-	ret = gpio_pin_configure_dt(&hw_rev_bit_2, GPIO_INPUT | GPIO_PULL_UP);
-
-	return ret;
-}
 
 /**************************************************/
 
@@ -752,12 +694,6 @@ static int init_magnetorquer(void) {
 		return err;
 	}
 
-	board_rev = gpio_pin_get_dt(&hw_rev_bit_0) << 0 |
-				gpio_pin_get_dt(&hw_rev_bit_1) << 1 |
-				gpio_pin_get_dt(&hw_rev_bit_2) << 2;
-
-	LOG_INF("Board Rev %u", board_rev);
-
 	err = init_dac();
 	if (err) {
 		LOG_ERR("Error initializing DAC: %d", err);
@@ -835,21 +771,6 @@ static int init_magnetorquer(void) {
 	return err;
 }
 
-static void check_magnetorquer_fault(void)
-{
-	int fault;
-
-	fault = gpio_pin_get_dt(&n_mt_en_fault);
-	if (!fault) {
-		LOG_WRN("Fault on magnetorquer driver(s)!");
-
-		// TODO: ask Andrew if this is ok to do. It wasn't in the old code.
-		// LOG_INF("Resetting magnetorquer drivers.");
-		// (void)reset_magnetorquer();
-	}
-
-}
-
 #if !defined(CONFIG_MAGNETORQUER_EXPLORE) // normal operation
 
 static int handle_magnetorquer(void *p1, void *p2, void *p3)
@@ -902,7 +823,9 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 			LOG_WRN("One or more PWM channels could not be set: %d", err);
 		}
 
-		check_magnetorquer_fault();
+		if (check_magnetorquer_fault()) {
+			// do something on a fault?
+		}
 
 		print_debug_output();
 

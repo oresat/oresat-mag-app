@@ -40,7 +40,7 @@ project(oresat_mcxn947_mag)
 
 include_directories("${PROJECT_SOURCE_DIR}") # needed so c code can find this header
 
-target_sources(app PRIVATE src/main.c src/windowed_average.c)
+target_sources(app PRIVATE src/main.c src/windowed_average.c src/gpios.c)
 
 # Compile in various files depending on Kconfig values.
 target_sources_ifdef(CONFIG_DAC_INTF     app PRIVATE src/dac.c)
