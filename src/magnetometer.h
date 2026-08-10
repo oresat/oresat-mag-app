@@ -4,6 +4,11 @@
 //#define DEV_MAG_ZEPHYR_ENABLE_MAGB
 #define NUM_MAGS 2
 
+// TODO [ ] Determine whether the following enum for RM3100 sensor physical
+//          positions is going to be not possible to support, in conjunction
+//          with device tree "foreach" macros which do not guarantee the order
+//          of their generated code fragments:
+
 // The order below matches the order in the object dictionary.
 typedef enum {
 	EC_MAG_0_PZ_1 = 0,
