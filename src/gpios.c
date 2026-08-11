@@ -43,16 +43,10 @@ int init_gpios(void)
 
 	initialized = true;
 
-	// TODO: figure this out
-	// GPIO_LINE_OPEN_DRAIN gives an assertion:
-	// ASSERTION FAIL [(flags & (1 << 1)) != 0 || (flags & (1 << 2)) == 0] @ WEST_TOPDIR/zephyr/include/zephyr/drivers/gpio.h:1002
-
-	// this should be GPIO_OPEN_DRAIN, but the MCXN947 gpio driver does not support it
-	// instead, set to INPUT to float, or OUTPUT_INACTIVE to drive low
-	ret = gpio_pin_configure_dt(&mt_en, GPIO_INPUT);
-	if (ret) {
-		LOG_ERR("Could not configure mt_en as input: %d", ret);
-		err = ret;
+	err = gpio_pin_set_dt(&mt_en, false); // disable the STSPIN250s
+	if (err) {
+		LOG_ERR("Error setting mt_en low: %d", err);
+		return err;
 	}
 	ret = gpio_pin_configure_dt(&n_mt_en_fault, GPIO_INPUT);
 	if (ret) {
