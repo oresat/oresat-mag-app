@@ -126,13 +126,16 @@ struct rm3100_sensor_ctx {
 };
 
 // Macro to create array entry based on sensor context struct:
+// Note: the pattern 'mag##inst' must match the form of magnetometer device
+//  node aliases in this app's device tree sources.
 
 #define MAG_ADD_SENSOR_TO_TABLE(inst)              \
 {                                                  \
 	.dev = DEVICE_DT_GET(DT_ALIAS(mag##inst)), \
 	.status_ok = false,                        \
 	.dt_instance = inst,                       \
-	.reg = 0,                                  \
+	/* - 0811 - build time warning about "braces around scalar initializer": */ \
+	.reg = DT_PROP(DT_ALIAS(mag##inst), reg),  \
 	.obj_dict_order = 0,                       \
 	.iodev = &iodev_##inst,                    \
 	.rtio_ctx = &ctx_##inst,                   \
@@ -179,6 +182,26 @@ static void stop_end_cap_magnetometers(void) {
 }
 #endif
 
+uint32_t mag_axis_to_mag_index(end_card_magnetometer_t axis) {
+	// STUB FUNCTION . . .
+	return 0;
+}
+
+// A development time routine, may be removed to prep for production code:
+
+static int32_t mag_sensor_summary(void)
+{
+	int32_t rc = 0;
+	if (ARRAY_SIZE(rm3100_ctx) < 1) {
+		return -ENODEV;
+	}
+	for (uint32_t i = 0; i < ARRAY_SIZE(rm3100_ctx); i++) {
+		LOG_INF("- DEV 0811 - rm3100 dt instance %d has I2C device address %02X",
+			rm3100_ctx[i].dt_instance, rm3100_ctx[i].reg);
+	}
+	return rc;
+}
+
 static void start_end_cap_magnetometers(void) {
 	gpio_pin_set_dt(&n_mag_en, true);
 	k_sleep(K_MSEC(10));
@@ -211,9 +234,15 @@ int init_mag(void)
 {
 	int ret;
 	uint32_t count = 1;
+	int32_t rc = 0;
 
 	LOG_INF("- DEV 0810 - From device tree built sensor array of %d elements",
 		ARRAY_SIZE(rm3100_ctx));
+
+	rc = mag_sensor_summary();
+	if (rc < 0) {
+		LOG_WRN("- DEV 0811 - dev-only magnetometer summary report failed, err %d", rc);
+	}
 
 	k_msleep(500);
 	LOG_INF("Initializing magnetometers");
