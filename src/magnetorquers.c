@@ -638,11 +638,11 @@ static int reset_magnetorquer(void)
 {
 	int err;
 
-	err = gpio_pin_configure_dt(&mt_en, GPIO_OUTPUT_INACTIVE); // drive the pin low -- disable power stage
-	if (err) {
-		LOG_ERR("Error configuring mt_en output low: %d", err);
-		return err;
-	}
+//	err = gpio_pin_configure_dt(&mt_en, GPIO_OUTPUT_INACTIVE); // drive the pin low -- disable power stage
+//	if (err) {
+//		LOG_ERR("Error configuring mt_en output low: %d", err);
+//		return err;
+//	}
 	err = gpio_pin_set_dt(&mt_en, false);
 	if (err) {
 		LOG_ERR("Error setting mt_en low: %d", err);
@@ -719,11 +719,11 @@ static int init_magnetorquer(void) {
 		return err;
 	}
 
-	err = gpio_pin_configure_dt(&mt_en, GPIO_OUTPUT_INACTIVE); // drive the pin low
-	if (err) {
-		LOG_ERR("Error configuring mt_en output low: %d", err);
-		return err;
-	}
+//	err = gpio_pin_configure_dt(&mt_en, GPIO_OUTPUT_INACTIVE); // drive the pin low
+//	if (err) {
+//		LOG_ERR("Error configuring mt_en output low: %d", err);
+//		return err;
+//	}
 	err = gpio_pin_set_dt(&mt_en, false);
 	if (err) {
 		LOG_ERR("Error setting mt_en low: %d", err);

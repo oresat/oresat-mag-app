@@ -65,8 +65,8 @@
 		compatible = "mag-card";
 		mag-ready-gpios = <&gpio4 20 0>;	/* in */
 		n-mag-fault-gpios = <&gpio4 19 0>;	/* in */
-		n-mag-en-gpios = <&gpio4 17 0>;		/* out */
-		mt-en-gpios = <&gpio4 16 0>;		/* open drain out */
+		n-mag-en-gpios = <&gpio4 17 GPIO_ACTIVE_LOW>; 	/* out */
+		mt-en-gpios = <&gpio4 16 (GPIO_OPEN_DRAIN | GPIO_ACTIVE_HIGH)>; /* open drain out */
 		n-mt-en-fault-gpios = <&gpio4 13 0>;/* in */
 		n-mt-stby-rst-gpios = <&gpio4 12 0>;/* out */
 		mt-z-phase-gpios = <&gpio4 7 GPIO_ACTIVE_LOW>;	/* out */
@@ -97,6 +97,8 @@
 	pinctrl-names = "default";
 	clock-frequency = <I2C_BITRATE_STANDARD>;
 	status = "okay";
+	scl-gpios = <&gpio0 16 (GPIO_OPEN_DRAIN | GPIO_PULL_UP)>;
+	sda-gpios = <&gpio0 17 (GPIO_OPEN_DRAIN | GPIO_PULL_UP)>;
 
 	rm3100a: rm3100@20 {
 			compatible = "pni,rm3100";

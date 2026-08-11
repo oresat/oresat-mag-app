@@ -14,7 +14,7 @@
 #include "can_util.h"
 #include "gpios.h"
 
-LOG_MODULE_REGISTER(can_thread, CONFIG_CAN_LOG_LEVEL);
+LOG_MODULE_REGISTER(can_thread, LOG_LEVEL_INF);
 
 #define CAN_INTERFACE (DEVICE_DT_GET(DT_CHOSEN(zephyr_canbus)))
 #define CAN_BITRATE (DT_PROP_OR(DT_CHOSEN(zephyr_canbus), bitrate, \
