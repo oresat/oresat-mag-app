@@ -216,7 +216,11 @@ static int recover_i2c_bus(void)
 
     for (attempt = 1; attempt < MAX_I2C_RECOVERY_RETRIES; attempt++) {
         ret = i2c_recover_bus(DEVICE_DT_GET(DT_NODELABEL(flexcomm0_lpi2c0)));
-        if (ret) {
+		if (ret == -ENOSYS) {
+			LOG_WRN("I2C bus recovery is not implemented. Giving up.");
+			ret = 0;
+			break;
+		} else if (ret) {
             LOG_WRN("I2C bus is stuck (err: %d); recovery failed", ret);
         } else { // do something to verify that it is actually working
             if (device_is_ready(dev)) {
