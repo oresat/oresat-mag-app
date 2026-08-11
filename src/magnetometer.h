@@ -9,6 +9,11 @@
 //          with device tree "foreach" macros which do not guarantee the order
 //          of their generated code fragments:
 
+// Note:
+// - EC stands for End Cap, as in "end cap card".
+// - PZ stands for positive z-axis.
+// - MZ stands for negative z-axis.
+
 // The order below matches the order in the object dictionary.
 typedef enum {
 	EC_MAG_0_PZ_1 = 0,
