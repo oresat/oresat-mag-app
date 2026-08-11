@@ -25,7 +25,7 @@
 #include "magnetometer.h"
 #include "windowed_average.h"
 
-LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_ERR);
 
 /* size of stack area used by each thread */
 #define STACK_SIZE 4096
@@ -33,42 +33,42 @@ LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_DBG);
 /* scheduling priority used by each thread */
 #define PRIORITY 7
 
-#define HIST_LEN 10								// number of current reading samples to use for running average
+#define HIST_LEN 10			// number of current reading samples to use for running average
 
-#define MAGNETORQUER_STARTUP_DELAY 2000			// roughly when all the helper threads are up; TODO: add interthread signalling for this
-#define ITERATION_PERIOD 5						// ms
-#define DEBUG_PRINT_PERIOD 1500					// ms
-#define MAGNETORQUER_UPDATE_PERIOD 100          // ms
+#define MAGNETORQUER_STARTUP_DELAY 2000	// roughly when all the helper threads are up; TODO: add interthread signalling for this
+#define ITERATION_PERIOD 5		// ms
+#define DEBUG_PRINT_PERIOD 1500		// ms
+#define MAGNETORQUER_UPDATE_PERIOD 100	// ms
 #define MT_LOOP_PRINT_PERIOD 100
-#define ISENSE_GAIN 50.0f						// gain of the INA185 op amp
-#define ISENSE_R_OHMS 0.030f					// resistance between the op amp + and - inputs
-#define VSENSE_INPUT_OFFSET_TYP_UV 5			// typically, the INA185 can have +/- this many microvolts offset on the input (pre-gain)
-#define VSENSE_INPUT_OFFSET_MAX_UV 55			// maximum offset in microvolts -- even when no current is flowing through Rsense
+#define ISENSE_GAIN 50.0f		// gain of the INA185 op amp
+#define ISENSE_R_OHMS 0.030f		// resistance between the op amp + and - inputs
+#define VSENSE_INPUT_OFFSET_TYP_UV 5	// typically, the INA185 can have +/- this many microvolts offset on the input (pre-gain)
+#define VSENSE_INPUT_OFFSET_MAX_UV 55	// maximum offset in microvolts -- even when no current is flowing through Rsense
 
 #define ZEPHYR_USER_NODE DT_PATH(zephyr_user)
-#define DAC_RANGE 4096							// TODO: use real value from device tree
+#define DAC_RANGE 4096			// TODO: use real value from device tree
 #define DAC_VREF 3.3f
 #if (DT_NODE_HAS_PROP(ZEPHYR_USER_NODE, r58_ohms))
 #define R1_OHMS DT_PROP(ZEPHYR_USER_NODE, r58_ohms)
 #else
-#define R1_OHMS 237								// R58 should have been 23.7K -- NOTE: might be defined below based on device tree
+#define R1_OHMS 237			// R58 should have been 23.7K -- NOTE: might be defined below based on device tree
 #endif
-#define R2_OHMS 1000							// R59
-#define R_SENSE_TOTAL (2 * ISENSE_R_OHMS)		// shown in schematic, a second ISENSE_R_OHMS is in series from the op amp - input to ground
-#define MAGNETORQUER_CURRENT_LIMIT_A 2.0f		// specified in schematic
+#define R2_OHMS 1000			// R59
+#define R_SENSE_TOTAL (2 * ISENSE_R_OHMS)	// shown in schematic, a second ISENSE_R_OHMS is in series from the op amp - input to ground
+#define MAGNETORQUER_CURRENT_LIMIT_A 2.0f	// specified in schematic
 
-#define VREF (MAGNETORQUER_CURRENT_LIMIT_A * R_SENSE_TOTAL)				// input to STSPIN250; with a total of 0.060 ohm sense resistance = ISENSE_R_OHMS * 2, this limits output current to 2A
-#define VOUT ((VREF * (R1_OHMS + R2_OHMS)) / R2_OHMS)					// calculate needed input V to voltage divider to get out desired Vref
+#define VREF (MAGNETORQUER_CURRENT_LIMIT_A * R_SENSE_TOTAL)	// input to STSPIN250; with a total of 0.060 ohm sense resistance = ISENSE_R_OHMS * 2, this limits output current to 2A
+#define VOUT ((VREF * (R1_OHMS + R2_OHMS)) / R2_OHMS)		// calculate needed input V to voltage divider to get out desired Vref
 #define MT_ILIM_DAC_VALUE ((uint32_t)((VOUT * DAC_RANGE) / DAC_VREF))	// convert that to a raw DAC value
 
 #define MAX_PWM_DUTY_CYCLE_X 10000
 #define MAX_PWM_DUTY_CYCLE_Y 10000
 #define MAX_PWM_DUTY_CYCLE_Z 10000
 
-#define OPERATING_VBUSP_MV 8200					// set Kff so that we get maximum possible current at 100% duty cycle for mid-point of battery voltage
-#define R_X_MT 15.5								// DC resistance of X axis magnetorquer
-#define R_Y_MT 15.5								// DC resistance of Y axis magnetorquer
-#define R_Z_MT 60.0								// DC resistance of Z axis magnetorquer
+#define OPERATING_VBUSP_MV 8200		// set Kff so that we get maximum possible current at 100% duty cycle for mid-point of battery voltage
+#define R_X_MT 15.5			// DC resistance of X axis magnetorquer
+#define R_Y_MT 15.5			// DC resistance of Y axis magnetorquer
+#define R_Z_MT 60.0			// DC resistance of Z axis magnetorquer
 
 static const int32_t max_i_ua[] = {
 	(int32_t)((OPERATING_VBUSP_MV * 1000) / R_X_MT),
