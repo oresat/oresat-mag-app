@@ -1,17 +1,16 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
-//#include <zephyr/devicetree.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/sensor.h>
-//#include <zephyr/sys/byteorder.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/settings/settings.h>
 #include <zephyr/shell/shell.h>
-//#include <canopennode.h>
-//#include <CO_OD.h>
 
 #include "windowed_average.h"
 #include "imu.h"
+
+#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(imu_bmi, CONFIG_SENSOR_LOG_LEVEL);
 
 /**
  * From the mag requirements doc, which reigns supreme not this
@@ -44,13 +43,6 @@
  * on INT2 and we use that as CLKIN. PIN9_FUNCTION should be
  * 0b10 then, otherwise it’s INT2 which is 0b00.
  */
-
-#include "../drivers/sensor/tdk/icm4268x/icm4268x_reg.h"
-
-#include "windowed_average.h"
-
-#include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(imu_bmi, CONFIG_SENSOR_LOG_LEVEL);
 
 #define IMU_DEVICE_ADDR 0x68 // I2C 7 bit address
 #define IMU_DEVICE_ADDR_ALT 0x69 // I2C 7 bit address
@@ -678,11 +670,11 @@ static void handle_imu(void *p1, void *p2, void *p3)
 
 	int count = 0;
 	int samples = 0;
-	int i;
 	int32_t temp = 0;
 	k_msleep(IMU_STARTUP_DELAY);
 
 	LOG_INF("Starting imu loop");
+
 	for (;;) {
 		if (reset_cal) {
 			g_cal[0] = 0;
