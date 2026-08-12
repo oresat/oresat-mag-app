@@ -4,11 +4,6 @@
 //#define DEV_MAG_ZEPHYR_ENABLE_MAGB
 #define NUM_MAGS 2
 
-// TODO [ ] Determine whether the following enum for RM3100 sensor physical
-//          positions is going to be not possible to support, in conjunction
-//          with device tree "foreach" macros which do not guarantee the order
-//          of their generated code fragments:
-
 // Note:
 // - EC stands for End Cap, as in "end cap card".
 // - PZ stands for positive z-axis.
@@ -25,5 +20,4 @@ typedef enum {
 
 int get_mag_reading(int mag_num, int32_t *x, int32_t *y, int32_t *z);
 
-#endif
-
+#endif // _MAGNETOMETER_H_
