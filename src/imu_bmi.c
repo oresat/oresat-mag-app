@@ -680,6 +680,7 @@ static void handle_imu(void *p1, void *p2, void *p3)
 	int samples = 0;
 	int i;
 	int32_t temp = 0;
+	k_msleep(IMU_STARTUP_DELAY);
 
 	LOG_INF("Starting imu loop");
 	for (;;) {
@@ -692,20 +693,6 @@ static void handle_imu(void *p1, void *p2, void *p3)
 			reset_windowed_average(&gz_hist);
 			reset_cal = false;
 			samples = 0;
-		}
-		for (i = 0; i < DATA_READY_TRIES; i++) {
-#if 0
-			err = imu_read_reg(REG_INT_STATUS, &int_status);
-			if (!err && (int_status & BIT_DATA_RDY_INT)) {
-				break;
-			}
-			k_msleep(1);
-#else
-			break;
-#endif
-		}
-		if (err) {
-			LOG_ERR("Timeout waiting for data ready");
 		}
 		err = process_data(a_raw, g_raw, a_cal, g_cal, &temp);
 		if (!err) {
@@ -725,9 +712,9 @@ static void handle_imu(void *p1, void *p2, void *p3)
 			count++;
 			if (count >= (DEBUG_PRINT_PERIOD / IMU_ODR) ){
 				count = 0;
-				LOG_DBG("Ave accl: (%d, %d, %d)", a_raw[0], a_raw[1], a_raw[2]);
-				LOG_DBG("Ave gyro: (%d, %d, %d)", g_raw[0], g_raw[1], g_raw[2]);
-				LOG_DBG("Ave temp: (dC): %d", temp_decicentigrade);
+				LOG_DBG("Accl %d, %d, %d", a_raw[0], a_raw[1], a_raw[2]);
+				LOG_DBG("Gyro %d, %d, %d", g_raw[0], g_raw[1], g_raw[2]);
+				LOG_DBG("Temp %d", temp_decicentigrade);
 			}
 		}
 		k_msleep(IMU_ITERATION_PERIOD);
