@@ -182,9 +182,68 @@ static void stop_end_cap_magnetometers(void) {
 }
 #endif
 
-uint32_t mag_axis_to_mag_index(end_card_magnetometer_t axis) {
-	// STUB FUNCTION . . .
-	return 0;
+/**
+ * @note In the main branch at commit 4bf8bee004, device tree source aliases
+ *  mag0 to the magnetometer with I2C device address 0x20, and aliases mag1 to
+ *  the device node with I2C device address 0x22.  Further, that code associates
+ *  the enum element EC_MAG_0_PZ_1 with mag0, and enum element EC_MAG_1_PZ_2
+ *  with mag1.
+ *
+ *  In order to support calls to get_mag_reading(idx, *x, *y, *z), the
+ *  following routine maps magnetometer axis enum values to the corresponding
+ *  mag sensor context struct in this module.  The array of these context
+ *  structs is populated by a Zephyr 'foreach' device tree macro, which doesn't
+ *  guarantee the order of the device nodes it finds at compile time.  For this
+ *  reason, a run time look-up function is needed.
+ *
+ * @param . . .
+ *
+ * @retval -ENODEV when magnetometer array holds no sensor contexts, meaning
+ *  no sensors were detected at build time.
+ */
+
+int32_t mag_axis_to_mag_index(const end_card_magnetometer_t axis, uint32_t *mag_idx)
+{
+	uint32_t reg = 0;
+	uint32_t idx = 0;
+	int32_t rc = 0;
+
+	if (ARRAY_SIZE(rm3100_ctx) < 1) {
+		return -ENODEV;
+	}
+
+	switch(axis)
+	{
+	// Note these case statement axis-to-i2c-addr associations are taken
+	// from mag app main branch, commit hash 4bf8bee004:
+	case EC_MAG_0_PZ_1:
+		reg = 0x20;
+		break;
+	case EC_MAG_1_PZ_2:
+		reg = 0x22;
+		break;
+	default:
+		rc = -EINVAL;
+	}
+
+	if (rc != 0) {
+		LOG_ERR("Failed to map mag axis to discovered sensor, err %d",
+		        rc);
+		goto done;
+	}
+
+	for (idx = 0; idx < ARRAY_SIZE(rm3100_ctx); idx++) {
+		if (rm3100_ctx[idx].reg == reg) {
+			*mag_idx = idx;
+			LOG_INF("- DEV 0811 - matched mag axis %d with mag"
+				"sensor array idx %u", axis, *mag_idx);
+			break;
+		}
+	}
+
+	LOG_INF("");
+done:
+	return rc;
 }
 
 // A development time routine, may be removed to prep for production code:
@@ -192,13 +251,16 @@ uint32_t mag_axis_to_mag_index(end_card_magnetometer_t axis) {
 static int32_t mag_sensor_summary(void)
 {
 	int32_t rc = 0;
+
 	if (ARRAY_SIZE(rm3100_ctx) < 1) {
 		return -ENODEV;
 	}
+
 	for (uint32_t i = 0; i < ARRAY_SIZE(rm3100_ctx); i++) {
 		LOG_INF("- DEV 0811 - rm3100 dt instance %d has I2C device address %02X",
 			rm3100_ctx[i].dt_instance, rm3100_ctx[i].reg);
 	}
+
 	return rc;
 }
 
