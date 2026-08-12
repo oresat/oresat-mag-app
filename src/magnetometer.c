@@ -98,6 +98,12 @@ static void stop_end_cap_magnetometers(void) {
 static void start_end_cap_magnetometers(void) {
 	gpio_pin_set_dt(&n_mag_en, true);
 	k_sleep(K_MSEC(10));
+	if (gpio_pin_get_dt(&mag_ready)) {
+		LOG_INF("MAG_PWR is ready!");
+	} else {
+		LOG_ERR("MAG_PWR is not ready!");
+	}
+
 }
 
 static const struct device *check_rm3100_sensor(const struct device *rm3100_dev)
