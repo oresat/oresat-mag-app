@@ -198,7 +198,13 @@ static int recover_i2c_bus(void)
         LOG_ERR("Unable to recover i2c bus after 10 resets. Will stop trying.");
     }
 
-    if (device_is_ready(dev)) {
+	// We use deferred-init in the device tree, which means we need to manually start the driver
+	ret = device_init(dev);
+	if (ret) {
+		LOG_WRN("Device not started: %d", ret);
+	}
+
+	if (device_is_ready(dev)) {
         if (rec_count) {
             LOG_INF("Resetting recovery count. Recovery successful");
             store_recovery_count(0); // reset since we're good
@@ -215,9 +221,11 @@ static int recover_i2c_bus(void)
 		} else if (ret) {
             LOG_WRN("I2C bus is stuck (err: %d); recovery failed", ret);
         } else { // do something to verify that it is actually working
+			LOG_INF("Bus recovered.");
             if (device_is_ready(dev)) {
                 break;
             }
+			k_msleep(100);
 			ret = device_init(dev);
             if (!ret) {
                 LOG_INF("I2C bus recovery successful.");
@@ -285,12 +293,6 @@ static int init_imu(void)
 	}
 
 	imu_is_ready = false;
-
-	// We use deferred-init in the device tree, which means we need to manually start the driver
-	ret = device_init(dev);
-	if (ret) {
-		LOG_ERR("Error starting BMI270 driver: %d", ret);
-	}
 
 	if (!device_is_ready(dev)) {
 		LOG_ERR("IMU %s is not ready", dev->name);
