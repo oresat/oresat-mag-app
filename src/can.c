@@ -174,7 +174,9 @@ static void handle_can(void *p1, void *p2, void *p3)
 	}
 
 	CO_delete(&can);
+#if defined(CONFIG_REBOOT)
 	sys_reboot(SYS_REBOOT_COLD);
+#endif
 }
 
 K_THREAD_DEFINE(can_id, CAN_THREAD_STACK_SIZE, handle_can, NULL, NULL, NULL, CAN_THREAD_PRIORITY, 0, 0);
