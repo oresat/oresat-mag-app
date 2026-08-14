@@ -36,9 +36,6 @@ K_MUTEX_DEFINE(mag_data_mtx);
 #define SQ_SZ		(N)
 #define CQ_SZ		(N)
 
-// #define MAG0_NODE	DT_ALIAS(mag0)
-// #define MAG1_NODE	DT_ALIAS(mag1)
-
 #define SAMPLE_PERIOD	1.0 / DT_PROP(MAG0_NODE, odr)
 #define SAMPLE_SIZE	1
 
@@ -64,21 +61,21 @@ static const struct gpio_dt_spec mag_ready = GPIO_DT_SPEC_GET(BP_NODE, mag_ready
 static struct sensor_three_axis_data mag_data[NUM_MAGS];
 
 /**
- * @brief  Some Zephyr DTS macro use, to construct code for each magnetometer
- * node with status equal to "okay".
+ * @brief Zephyr DTS macros, and macros based on them, used to construct code
+ *  for each magnetometer node with status equal to "okay".
  *
+ * @note Normally used only in Zephyr drivers, here we define DT_DRV_COMPAT to
+ *  match our magnetometer's DTS compatible property value.  (Our sensor is the
+ *  RM3100.)  We leave this defined long enough to use a device tree "foreach"
+ *  type of macro, to generate code constructs for each device tree node with
+ *  this sensor enabled.
  */
-
-// Normally used only in Zephyr drivers, here we define DT_DRV_COMPAT to match 
-// our magnetometer, the RM3100.  We leave this defined long enough to use a
-// device tree "foreach" type of macro, to generate code constructs for each
-// device tree node with this sensor enabled.
 
 #define DT_DRV_COMPAT pni_rm3100
 
 // Create the two basic, static-qualified RTIO structs which each magnetometer
 // needs, in order to interface with Zephyr's real time I/O sub-system.  Note
-// these structs are described in zephyr/include/zephyr/sensor.h.
+// that these structs are described in zephyr/include/zephyr/sensor.h.
 
 #define MAG_CREATE_IODEV_AND_CONTEXT_STRUCT(inst) \
 SENSOR_DT_READ_IODEV(iodev_##inst, DT_ALIAS(mag##inst),  \
@@ -98,7 +95,7 @@ const struct sensor_decoder_api decoder_##inst;
 DT_INST_FOREACH_STATUS_OKAY(MAG_CREATE_DECODER)
 
 // Sensor context struct, to organize run-time state and connections of a
-// sensor to the RTIO sub-system and application code:
+// sensor to the RTIO sub-system and application code.
 
 struct rm3100_sensor_ctx {
 	// Zephyr device handle, pointing to struct of basic device attributes:
@@ -114,10 +111,9 @@ struct rm3100_sensor_ctx {
 	// Structs to connect sensor to Zephyr RTIO sub-system:
 	const struct rtio_iodev *iodev;
 	struct rtio *rtio_ctx;
-	// Encoded magntometer readings directly from sensor:
+	// Encoded magntometer readings obtained directly from sensor:
 	uint8_t readings[READINGS_BUFFER_SIZE];
 	// Decoded magnetometer readings:
-	// TODO [ ] Tie in this 'mag_data' with 'mag_data' array references in get_mag_reading():
 	struct sensor_three_axis_data mag_data;
 	// TODO [ ] Explain this parameter used in mag reading decoding:
 	uint32_t mag_fit;
@@ -140,7 +136,7 @@ struct rm3100_sensor_ctx {
 	.iodev = &iodev_##inst,                    \
 	.rtio_ctx = &ctx_##inst,                   \
 	.readings = {0},                           \
-	/* TODO [ ] initialize struct sensor_three_axis_data mag_data */ \
+	/* TODO [ ] Determine if safer, possible to init struct sensor_three_axis_data mag_data */ \
 	.mag_fit = 0,                              \
 	.decoder = &decoder_##inst,                \
 },
@@ -175,6 +171,7 @@ static int gpios_init(void)
     return ret;
 }
 
+// TODO [ ] Ask whether this commented function is needed or can be removed:
 #if 0
 static void stop_end_cap_magnetometers(void) {
 	//Disable power to the end cap magnetometers
@@ -196,8 +193,11 @@ static void stop_end_cap_magnetometers(void) {
  *  guarantee the order of the device nodes it finds at compile time.  For this
  *  reason, a run time look-up function is needed.
  *
- * @param . . .
+ * @param axis, the name position of the caller's magnetometer of interest
+ * @param mag_idx, a variable to hold an array index to an enabled magnetometer
+ *  sensor.
  *
+ * @retval 0 on success.  Sensor array index returned in mag_idx.
  * @retval -ENODEV when magnetometer array holds no sensor contexts, meaning
  *  no sensors were detected at build time.
  */
@@ -241,12 +241,11 @@ int32_t mag_axis_to_mag_index(const end_card_magnetometer_t axis, uint32_t *mag_
 		}
 	}
 
-	LOG_INF("");
 done:
 	return rc;
 }
 
-// A development time routine, may be removed to prep for production code:
+// A development time routine, may be removed to prepare for production code:
 
 static int32_t mag_sensor_summary(void)
 {
@@ -337,17 +336,15 @@ int init_mag(void)
 	for (idx = 0; idx < ARRAY_SIZE(rm3100_ctx); idx++) {
 		ret = device_init(rm3100_ctx[idx].dev);
 		if (ret < 0) {
+			LOG_ERR("- DEV 0811 - ");
 			LOG_ERR("Error initializing rm3100 device driver: %d", ret);
-			// mag_0_good = false;
 			rm3100_ctx[idx].status_ok = false;
 		} else if (check_rm3100_sensor(rm3100_ctx[idx].dev) == NULL) {
 			LOG_ERR("Could not find RM3100 magnetometer, dt instance %u",
 				rm3100_ctx[idx].dt_instance);
 			ret = -ENODEV;
-			// mag_0_good = false;
 			rm3100_ctx[idx].status_ok = false;
 		} else {
-			// mag_0_good = true;
 			rm3100_ctx[idx].status_ok = true;
 		}
 	}
@@ -358,12 +355,28 @@ int init_mag(void)
 int get_mag_reading(int mag_num, int32_t *x, int32_t *y, int32_t *z)
 {
 	// TODO [ ] add mutex protection here, to avoid race condition
-	//          when caller is read mag_data[] and this module is writing
-	//          to it.
+	//          when caller wants to read mag_data[] and this module is
+	//          writing to it.
 
 	if (mag_num >= NUM_MAGS) {
 		return -EINVAL; // we don't support that one yet
 	}
+
+	/*
+	Convert magnetometer number to index to array of sensors element.
+	Sensors are discovered by device tree macros, which don't guarantee any
+	particular ordering of those sensors.
+	*/
+
+	uint32_t mag_idx = 0;
+	int32_t rc = 0;
+	rc = mag_axis_to_mag_index(mag_num, &mag_idx);
+	if (rc != 0) {
+		LOG_ERR("Failed to get index to sensor corresponding to mag axis %d, err %d",
+			mag_num, rc);
+		return rc;
+	}
+
 	/*
 	The 32 bit value is shifted by the shift amount, but what that means in
 	practical terms is hard to figure out. See:
@@ -380,9 +393,9 @@ int get_mag_reading(int mag_num, int32_t *x, int32_t *y, int32_t *z)
 	What we want is to convert the reading to milligauss.
 	*/
 
-	*x = (int32_t)(SHIFT_Q31_TO_F32(mag_data[mag_num].readings[0].x, mag_data[mag_num].shift) * 1000.0f);
-	*y = (int32_t)(SHIFT_Q31_TO_F32(mag_data[mag_num].readings[0].y, mag_data[mag_num].shift) * 1000.0f);
-	*z = (int32_t)(SHIFT_Q31_TO_F32(mag_data[mag_num].readings[0].z, mag_data[mag_num].shift) * 1000.0f);
+	*x = (int32_t)(SHIFT_Q31_TO_F32(mag_data[mag_idx].readings[0].x, mag_data[mag_idx].shift) * 1000.0f);
+	*y = (int32_t)(SHIFT_Q31_TO_F32(mag_data[mag_idx].readings[0].y, mag_data[mag_idx].shift) * 1000.0f);
+	*z = (int32_t)(SHIFT_Q31_TO_F32(mag_data[mag_idx].readings[0].z, mag_data[mag_idx].shift) * 1000.0f);
 
 	return 0;
 }
@@ -414,9 +427,6 @@ static void handle_mag(void *p1, void *p2, void *p3)
 		for (idx = 0; idx < ARRAY_SIZE(rm3100_ctx); idx++) {
 			if (rm3100_ctx[idx].status_ok) {
 				LOG_DBG("Reading mag '%s'", rm3100_ctx[idx].dev->name);
-// TODO [ ] Determine, may we move 'iodev' into rm3100_ctx array of sensor context structs?
-//   ANSWER: maybe not directly as iodev struct is static qualified, but maybe by pointer.
-				// rc = sensor_read(&iodev, &ctx, buf, 128);
 				rc = sensor_read(rm3100_ctx[idx].iodev, rm3100_ctx[idx].rtio_ctx,
 						rm3100_ctx[idx].readings, 128);
 				if (rc != 0) {
@@ -425,12 +435,7 @@ static void handle_mag(void *p1, void *p2, void *p3)
 					break;
 				}
 
-// TODO [ ] Refactor decoder struct and mag_fit variable into rm3100 context:
-				// const struct sensor_decoder_api *decoder;
-				// uint32_t mag_fit = 0;
-
 				LOG_DBG("Getting mag 0 decoder");
-				// rc = sensor_get_decoder(rm3100_ctx[idx].dev, &decoder);
 				rc = sensor_get_decoder(rm3100_ctx[idx].dev,
 						&rm3100_ctx[idx].decoder);
 				if (rc != 0) {
@@ -441,8 +446,6 @@ static void handle_mag(void *p1, void *p2, void *p3)
 
 				LOG_DBG("Decoding mag '%s' into plus Z mag 1",
 					rm3100_ctx[idx].dev->name);
-				// decoder->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_XYZ, 0},
-				//		&mag_fit, 1, &mag_data[EC_MAG_0_PZ_1]);
 				rm3100_ctx[idx].decoder->decode(rm3100_ctx[idx].readings,
 						(struct sensor_chan_spec) {SENSOR_CHAN_MAGN_XYZ, 0},
 						&rm3100_ctx[idx].mag_fit, 1,
