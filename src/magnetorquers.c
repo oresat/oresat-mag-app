@@ -157,6 +157,8 @@ static char *axis_names[] = {
 	"X", "Y", "Z"
 };
 
+static uint32_t num_mags_fs = 0;
+
 /* === GPIO data === */
 #define BP_NODE DT_NODELABEL(maggpios)
 
@@ -504,7 +506,7 @@ static int get_mag_readings(three_axis_data *axes)
 	int32_t my;
 	int32_t mz;
 
-	for (i = 0; i < NUM_MAGS; i++) {
+	for (i = 0; i < num_mags_fs; i++) {
 		int ret = get_mag_reading(i, &mx, &my, &mz); // get readings in milligauss
 		if (ret) {
 			err = ret; // be sure to report any errors, even just 1
@@ -716,6 +718,8 @@ static int reset_magnetorquer(void)
 
 static int init_magnetorquer(void) {
 	int err;
+
+	num_mags_detected(&num_mags_fs);
 
 	init_windowed_average(&g_adcs_data.mt_pwm_data[0].ofs_mv_store,
 						  g_adcs_data.mt_pwm_data[0].ofs_mv_buffer, HIST_LEN, "adcx");

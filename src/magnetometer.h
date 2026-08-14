@@ -1,9 +1,6 @@
 #ifndef _MAGNETOMETER_H_
 #define _MAGNETOMETER_H_
 
-//#define DEV_MAG_ZEPHYR_ENABLE_MAGB
-#define NUM_MAGS 2
-
 // Note:
 // - EC stands for End Cap, as in "end cap card".
 // - PZ stands for positive z-axis.
@@ -19,5 +16,7 @@ typedef enum {
 } end_card_magnetometer_t;
 
 int get_mag_reading(int mag_num, int32_t *x, int32_t *y, int32_t *z);
+
+void num_mags_detected(uint32_t *num_mags);
 
 #endif // _MAGNETOMETER_H_
