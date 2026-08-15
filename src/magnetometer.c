@@ -239,6 +239,7 @@ int32_t mag_axis_to_mag_index(const end_card_magnetometer_t axis, uint32_t *mag_
 		reg = 0x22;
 		break;
 	default:
+		// If axis does not match a defined case, that input is invalid.
 		rc = -EINVAL;
 	}
 
@@ -248,9 +249,13 @@ int32_t mag_axis_to_mag_index(const end_card_magnetometer_t axis, uint32_t *mag_
 		goto done;
 	}
 
+	// Now we search for a sensor with known I2C device address (reg property) value.
+	// Assign return code rc with current state "error no such device":
+	rc = -ENODEV;
 	for (idx = 0; idx < ARRAY_SIZE(rm3100_ctx); idx++) {
 		if (rm3100_ctx[idx].reg == reg) {
 			*mag_idx = idx;
+			rc = 0;
 			LOG_INF("matched mag axis %d with mag sensor array"
 				"idx %u", axis, *mag_idx);
 			break;
