@@ -318,12 +318,9 @@ int init_mag(void)
 	uint32_t count = 1;
 	int32_t rc = 0;
 
-	LOG_INF("- DEV 0810 - From device tree built sensor array of %d elements",
-		ARRAY_SIZE(rm3100_ctx));
-
 	rc = mag_sensor_summary();
 	if (rc < 0) {
-		LOG_WRN("- DEV 0811 - dev-only magnetometer summary report failed, err %d", rc);
+		LOG_WRN("dev-only magnetometer summary report failed, err %d", rc);
 	}
 
 	k_msleep(500);
@@ -357,7 +354,6 @@ int init_mag(void)
 	for (idx = 0; idx < ARRAY_SIZE(rm3100_ctx); idx++) {
 		ret = device_init(rm3100_ctx[idx].dev);
 		if (ret < 0) {
-			LOG_ERR("- DEV 0811 - ");
 			LOG_ERR("Error initializing rm3100 device driver: %d", ret);
 			rm3100_ctx[idx].status_ok = false;
 		} else if (check_rm3100_sensor(rm3100_ctx[idx].dev) == NULL) {
