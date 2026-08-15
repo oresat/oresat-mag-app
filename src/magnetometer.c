@@ -28,7 +28,6 @@ LOG_MODULE_REGISTER(magnetometer, CONFIG_SENSOR_LOG_LEVEL);
 #define MAG_THREAD_PRIORITY 0
 extern const k_tid_t mag_id;
 
-// TODO [ ] Put this mutex to use around the writes and reads of mag_data[]:
 K_MUTEX_DEFINE(mag_data_mtx);
 
 #define N		(8)
@@ -374,10 +373,6 @@ int get_mag_reading(int mag_num, int32_t *x, int32_t *y, int32_t *z)
 	if (mag_num >= ARRAY_SIZE(rm3100_ctx)) {
 		return -EINVAL; // we don't support that one yet
 	}
-
-	// TODO [ ] add mutex protection here, to avoid race condition
-	//          when caller wants to read mag_data[] and this module is
-	//          writing to it.
 
 	if (k_mutex_lock(&mag_data_mtx, K_MSEC(MAG_GET_READING_TIMEOUT_MS)) == 0) {
 		/* mutex successfully locked */
