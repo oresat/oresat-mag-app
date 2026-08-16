@@ -534,8 +534,8 @@ static int get_current_readings(mt_pwm_phase_data_t *axes)
 		return 0;
 	}
 
-	// now read the values acquired
-	for (i = 0; i < get_num_adc_channels(); i++) {
+	// now read the values acquired; we only have 3 axes, but sometimes there is a 4th ADC for Vbusp measurements
+	for (i = 0; i < min(get_num_adc_channels(), 3); i++) {
 		err = read_adc(i, &adc_mv);
 		if (err) {
 			continue;

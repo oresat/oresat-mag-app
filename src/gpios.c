@@ -147,14 +147,20 @@ bool get_can_fault(void)
 bool check_magnetorquer_fault(void)
 {
 	bool fault;
+	static int print_count = 0;
 
 	fault = gpio_pin_get_dt(&n_mt_en_fault);
 	if (!fault) {
-		LOG_WRN("Fault on magnetorquer driver(s)!");
+		if (print_count < 10) {
+			LOG_WRN("Fault on magnetorquer driver(s)!");
+			print_count++;
+		}
 
 		// TODO: ask Andrew if this is ok to do. It wasn't in the old code.
 		// LOG_INF("Resetting magnetorquer drivers.");
 		// (void)reset_magnetorquer();
+	} else {
+		print_count = 0;
 	}
 	return !fault;
 }
