@@ -61,7 +61,7 @@ LOG_MODULE_REGISTER(imu_bmi, CONFIG_SENSOR_LOG_LEVEL);
 #define DEBUG_PRINT_PERIOD  500 // 1s
 
 #define RAW_ACCEL_OUT_SCALE 1
-#define ACCEL_UNIT_SCALE 1
+#define ACCEL_UNIT_SCALE 1000.0f // milli-gs
 
 #define RAW_GYRO_OUT_SCALE 1
 #define GYRO_UNIT_SCALE 1000.0f // milli-degrees/second
@@ -95,15 +95,18 @@ static bool imu_is_ready;
 #define IMU_THREAD_PRIORITY 0
 extern const k_tid_t imu_id;
 
-static int32_t a_cal[3]; // offset when unit is not accelerating
-static int32_t a_raw[3];
+static int32_t a_cal[3];	// offset when unit is not accelerating
+static int32_t a_sns[3];	// original sensor output value
+static int32_t a_mgs[3];	// output value in milli-gs
 
-static int32_t g_cal[3]; // offset when unit is not rotating
-static int32_t g_raw[3];
+static int32_t g_cal[3];	// offset when unit is not rotating
+static int32_t g_sns[3];	// original sensor output value
+static int32_t g_mdps[3];	// output value in milli-degrees per second
 
 static int32_t gtemp;
 
-static bool reset_cal;
+static bool reset_acal;
+static bool reset_gcal;
 
 const struct device *const dev = DEVICE_DT_GET_ONE(bosch_bmi270);
 
@@ -142,6 +145,26 @@ static int store_recovery_count(uint8_t recovery_count)
 	return rc;
 }
 
+static void load_accel_calibration(int32_t *acal)
+{
+	int rc1;
+	int rc2;
+	int rc3;
+
+	settings_load();
+
+	rc1 = settings_load_one("ax_cal", (void *)&acal[0], sizeof(*acal));
+	rc2 = settings_load_one("ay_cal", (void *)&acal[1], sizeof(*acal));
+	rc3 = settings_load_one("az_cal", (void *)&acal[2], sizeof(*acal));
+
+	if (rc1 < 0 || rc2 < 0 || rc3 < 0) {
+		LOG_WRN("No accelerometer calibration found in settings. Rebuild with shell and run accelcal.");
+		acal[0] = 0;
+		acal[1] = 0;
+		acal[2] = 0;
+	}
+}
+
 static void load_gyro_calibration(int32_t *gcal)
 {
 	int rc1;
@@ -154,12 +177,35 @@ static void load_gyro_calibration(int32_t *gcal)
 	rc2 = settings_load_one("gy_cal", (void *)&gcal[1], sizeof(*gcal));
 	rc3 = settings_load_one("gz_cal", (void *)&gcal[2], sizeof(*gcal));
 
-	if (rc1 || rc2 || rc3) {
+	if (rc1 < 0 || rc2 < 0 || rc3 < 0) {
 		LOG_WRN("No gyroscope calibration found in settings. Rebuild with shell and run gyrocal.");
+		gcal[0] = 0;
+		gcal[1] = 0;
+		gcal[2] = 0;
 	}
 }
 
 #if defined(CONFIG_SHELL)
+static int store_accel_calibration(int32_t *acal)
+{
+	int rc;
+
+	rc = settings_save_one("ax_cal", (void *)&acal[0], sizeof(*acal));
+	if (rc < 0) {
+		LOG_WRN("Error saving ax_cal from settings: %d", rc);
+	}
+	rc = settings_save_one("ay_cal", (void *)&acal[1], sizeof(*acal));
+	if (rc < 0) {
+		LOG_WRN("Error saving ay_cal from settings: %d", rc);
+	}
+	rc = settings_save_one("az_cal", (void *)&acal[2], sizeof(*acal));
+	if (rc < 0) {
+		LOG_WRN("Error saving az_cal from settings: %d", rc);
+	}
+
+	return rc;
+}
+
 static int store_gyro_calibration(int32_t *gcal)
 {
 	int rc;
@@ -183,20 +229,20 @@ static int store_gyro_calibration(int32_t *gcal)
 
 static int recover_i2c_bus(void)
 {
-    int ret;
-    int attempt;
+	int ret;
+	int attempt;
 	int rec_count = 0;
 
-    ret = settings_subsys_init();
-    if (ret) {
-        LOG_ERR("settings subsys initialization: fail (err %d)", ret);
-    }
+	ret = settings_subsys_init();
+	if (ret) {
+		LOG_ERR("settings subsys initialization: fail (err %d)", ret);
+	}
 
-    rec_count = load_recovery_count();
-    LOG_INF("  I2C recovery count: %d", rec_count);
-    if (rec_count >= MAX_RECOVERY_BOOTS) {
-        LOG_ERR("Unable to recover i2c bus after 10 resets. Will stop trying.");
-    }
+	rec_count = load_recovery_count();
+	LOG_INF("  I2C recovery count: %d", rec_count);
+	if (rec_count >= MAX_RECOVERY_BOOTS) {
+		LOG_ERR("Unable to recover i2c bus after 10 resets. Will stop trying.");
+	}
 
 	// We use deferred-init in the device tree, which means we need to manually start the driver
 	ret = device_init(dev);
@@ -205,53 +251,53 @@ static int recover_i2c_bus(void)
 	}
 
 	if (device_is_ready(dev)) {
-        if (rec_count) {
-            LOG_INF("Resetting recovery count. Recovery successful");
-            store_recovery_count(0); // reset since we're good
-        }
-        return 0;
-    }
+		if (rec_count) {
+			LOG_INF("Resetting recovery count. Recovery successful");
+			store_recovery_count(0); // reset since we're good
+		}
+		return 0;
+	}
 
-    for (attempt = 1; attempt < MAX_I2C_RECOVERY_RETRIES; attempt++) {
-        ret = i2c_recover_bus(DEVICE_DT_GET(DT_NODELABEL(flexcomm0_lpi2c0)));
+	for (attempt = 1; attempt < MAX_I2C_RECOVERY_RETRIES; attempt++) {
+		ret = i2c_recover_bus(DEVICE_DT_GET(DT_NODELABEL(flexcomm0_lpi2c0)));
 		if (ret == -ENOSYS) {
 			LOG_WRN("I2C bus recovery is not implemented. Giving up.");
 			ret = 0;
 			break;
 		} else if (ret) {
-            LOG_WRN("I2C bus is stuck (err: %d); recovery failed", ret);
-        } else { // do something to verify that it is actually working
+			LOG_WRN("I2C bus is stuck (err: %d); recovery failed", ret);
+		} else { // do something to verify that it is actually working
 			LOG_INF("Bus recovered.");
-            if (device_is_ready(dev)) {
-                break;
-            }
+			if (device_is_ready(dev)) {
+				break;
+			}
 			k_msleep(100);
 			ret = device_init(dev);
-            if (!ret) {
-                LOG_INF("I2C bus recovery successful.");
-                break;
-            } else {
+			if (!ret) {
+				LOG_INF("I2C bus recovery successful.");
+				break;
+			} else {
 				LOG_ERR("Error starting BMI270 driver: %d", ret);
-            }
-        }
-        k_sleep(K_MSEC(10 * attempt));
-    }
+			}
+		}
+		k_sleep(K_MSEC(10 * attempt));
+	}
 
-    if (ret < 0) {
-        if (rec_count < MAX_RECOVERY_BOOTS) {
-            store_recovery_count(rec_count + 1);
-            settings_commit();
-            k_sleep(K_MSEC(500)); // give settings time to be written to flash
-            __ASSERT(ret < 0, "Giving up on soft reset of IMU. Rebooting.");
-        } else {
-            LOG_ERR("Cannot recover i2c bus after 10 reboot attempts. Giving up.");
-        }
-    } else if (rec_count) {
-        LOG_INF("Resetting recovery count. Recovery successful");
-        store_recovery_count(0); // reset since we're good
-    }
+	if (ret < 0) {
+		if (rec_count < MAX_RECOVERY_BOOTS) {
+			store_recovery_count(rec_count + 1);
+			settings_commit();
+			k_sleep(K_MSEC(500)); // give settings time to be written to flash
+			__ASSERT(ret < 0, "Giving up on soft reset of IMU. Rebooting.");
+		} else {
+			LOG_ERR("Cannot recover i2c bus after 10 reboot attempts. Giving up.");
+		}
+	} else if (rec_count) {
+		LOG_INF("Resetting recovery count. Recovery successful");
+		store_recovery_count(0); // reset since we're good
+	}
 
-    return ret;
+	return ret;
 }
 
 static int reset_imu(void)
@@ -416,6 +462,11 @@ static int configure_imu(void)
 			&sampling_freq);
 
 #else
+
+	// keeping the specs from Andrew for the ICM here as a reference
+	// TODO: compare what's available in the BMI that we can configure
+	// in similar manner
+
 	/* Enable gyro in low noise mode */
 	ret = imu_write_reg(REG_PWR_MGMT0, (BIT_GYRO_MODE_LNM << 2));
 	k_msleep(1); /* must sleep > 200 us before any other register access */
@@ -502,13 +553,14 @@ static int configure_imu(void)
 }
 
 /**
- *  @brief convert accel value to gs
+ *  @brief convert accel value to milli-gs
  *
  *  @param val_mps2 - in: driver value in meters / sec^2
- *  @param range - configured range in gs
+ *  @param range - configured range in milli-gs
  *  @retval int32_t - output value
  */
 static int32_t channel_accel_convert(struct sensor_value *val_mps2,
+									 int32_t *orig,
 									 uint8_t range)
 {
 	/* 16 bit accelerometer. 2^15 bits represent the range in g */
@@ -516,61 +568,71 @@ static int32_t channel_accel_convert(struct sensor_value *val_mps2,
 	int64_t out_val;
 
 	out_val = val_mps2->val1 * 1000000LL + val_mps2->val2;
+	*orig = (int32_t)out_val;
 
 	// driver does this:
-	// out_val = (out_val * SENSOR_G * (int64_t) range) / INT16_MAX;
-	out_val = (out_val * INT16_MAX) / (SENSOR_G * (int64_t)range);
+	// 16 bit accelerometer. 2^15 bits represent the range in G
+	// Converting from G to m/s^2:
+	//    out_val = (out_val * SENSOR_G * (int64_t) range) / INT16_MAX;
+	// The value of gravitational constant in micro m/s^2:
+	//    SENSOR_G 9806650
+	// 16 473 798   16 459 699
+
+	out_val = (int32_t)((out_val * ACCEL_UNIT_SCALE) / (SENSOR_G * RAW_ACCEL_OUT_SCALE));
 
 	return out_val;
 }
 
 /**
- *  @brief convert gyro value to degrees / sec
+ *  @brief convert gyro value to milli-degrees / sec
  *
  *  @param val_radians - in: driver value in radians / sec
  *  @param range - configured range in degrees / sec
  *  @retval int32_t - output value
  */
 static int32_t channel_gyro_convert(struct sensor_value *val_rps,
+									int32_t *orig,
 									uint16_t range)
 {
 	/* 16 bit gyroscope. 2^15 bits represent the range in degrees/s */
-	/* Converting to degrees/s from radians/s */
+	/* Converting to milli-degrees/s from radians/s */
 	int64_t out_val;
 
 	out_val = val_rps->val1 * 1000000LL + val_rps->val2;
+	*orig = (int32_t)out_val;
 
 	// driver does this:
-	// out_val = ((out_val * (int64_t) range * SENSOR_PI) / (180LL * INT16_MAX));
-	out_val = (out_val * 180LL * INT16_MAX) / (SENSOR_PI * (int64_t)range);
+	//   out_val = ((out_val * (int64_t) range * SENSOR_PI) / (180LL * INT16_MAX));
+	// so undo it here, and scale to milli-degrees/sec
+	out_val = (int32_t)((out_val * 180LL * GYRO_UNIT_SCALE) / (SENSOR_PI * RAW_GYRO_OUT_SCALE));
 
 	return out_val;
 }
 
-static int read_accel_data(int32_t *aval)
+static int read_accel_data(int32_t *a_val, int32_t *a_orig)
 {
 	struct sensor_value accel[3];
 	int ret;
 
 	ret = sensor_channel_get(dev, SENSOR_CHAN_ACCEL_XYZ, accel);
 	if (!ret) {
-		aval[0] = channel_accel_convert(&accel[0], IMU_ACCEL_RANGE_G);
-		aval[1] = channel_accel_convert(&accel[1], IMU_ACCEL_RANGE_G);
-		aval[2] = channel_accel_convert(&accel[2], IMU_ACCEL_RANGE_G);
+		a_val[0] = channel_accel_convert(&accel[0], &a_orig[0], IMU_ACCEL_RANGE_G);
+		a_val[1] = channel_accel_convert(&accel[1], &a_orig[1], IMU_ACCEL_RANGE_G);
+		a_val[2] = channel_accel_convert(&accel[2], &a_orig[2], IMU_ACCEL_RANGE_G);
 	}
 	return ret;
 }
 
-static int read_gyro_data(int32_t *gval)
+static int read_gyro_data(int32_t *g_val, int32_t *g_orig)
 {
 	struct sensor_value gyro[3];
 	int ret;
 
 	ret = sensor_channel_get(dev, SENSOR_CHAN_GYRO_XYZ, gyro);
 	if (!ret) {
-		gval[0] = channel_gyro_convert(&gyro[0], IMU_GYRO_RANGE_DPS);
-		gval[1] = channel_gyro_convert(&gyro[1], IMU_GYRO_RANGE_DPS);
-		gval[2] = channel_gyro_convert(&gyro[2], IMU_GYRO_RANGE_DPS);
+		g_val[0] = channel_gyro_convert(&gyro[0], &g_orig[0], IMU_GYRO_RANGE_DPS);
+		g_val[1] = channel_gyro_convert(&gyro[1], &g_orig[1], IMU_GYRO_RANGE_DPS);
+		g_val[2] = channel_gyro_convert(&gyro[2], &g_orig[2], IMU_GYRO_RANGE_DPS);
 	}
 	return ret;
 }
@@ -584,7 +646,9 @@ static int read_temp_data(int32_t *temp)
 	return ret;
 }
 
-static int process_data(int32_t *a, int32_t *g, int32_t *acal, int32_t *gcal, int32_t *temp)
+static int process_data(int32_t *a, int32_t *asns,
+						int32_t *g, int32_t *gsns,
+						int32_t *acal, int32_t *gcal, int32_t *temp)
 {
 	int err;
 	int32_t accel[3] = {0};
@@ -593,7 +657,7 @@ static int process_data(int32_t *a, int32_t *g, int32_t *acal, int32_t *gcal, in
 
 	sensor_sample_fetch(dev);
 
-	err = read_accel_data(accel);
+	err = read_accel_data(accel, asns);
 	if (err < 0) {
 		return err;
 	}
@@ -601,7 +665,7 @@ static int process_data(int32_t *a, int32_t *g, int32_t *acal, int32_t *gcal, in
 	a[1] = (int32_t)update_windowed_average(&ay_hist, accel[1]) - acal[1];
 	a[2] = (int32_t)update_windowed_average(&az_hist, accel[2]) - acal[2];
 
-	err = read_gyro_data(gyro);
+	err = read_gyro_data(gyro, gsns);
 	if (err < 0) {
 		return err;
 	}
@@ -622,18 +686,35 @@ static int process_data(int32_t *a, int32_t *g, int32_t *acal, int32_t *gcal, in
 // external interface
 void get_accel_data(int16_t *x, int16_t *y, int16_t *z)
 {
-	*x = (int16_t)(ACCEL_UNIT_SCALE * a_raw[0] / RAW_ACCEL_OUT_SCALE);  // convert to 0.001 degrees / second (milli-degrees per second)
-	*y = (int16_t)(ACCEL_UNIT_SCALE * a_raw[1] / RAW_ACCEL_OUT_SCALE);
-	*z = (int16_t)(ACCEL_UNIT_SCALE * a_raw[2] / RAW_ACCEL_OUT_SCALE);
+	*x = (int16_t)(a_mgs[0]);
+	*y = (int16_t)(a_mgs[1]);
+	*z = (int16_t)(a_mgs[2]);
 }
 
 // external interface
+void get_accel_raw_data(int16_t *x, int16_t *y, int16_t *z)
+{
+	*x = (int16_t)(a_sns[0]);
+	*y = (int16_t)(a_sns[1]);
+	*z = (int16_t)(a_sns[2]);
+}
+
+// external interface; sensor is mounted properly w.r.t. the satellite frame of reference,
+// so the axes do not need to be adjusted or inverted
 void get_gyro_data(int16_t *x, int16_t *y, int16_t *z, int16_t *temp)
 {
-	*x = (int16_t)(GYRO_UNIT_SCALE * g_raw[0] / RAW_GYRO_OUT_SCALE);  // convert to 0.001 degrees / second (milli-degrees per second)
-	*y = (int16_t)(GYRO_UNIT_SCALE * g_raw[1] / RAW_GYRO_OUT_SCALE);
-	*z = (int16_t)(GYRO_UNIT_SCALE * g_raw[2] / RAW_GYRO_OUT_SCALE);
+	*x = (int16_t)(g_mdps[0]);
+	*y = (int16_t)(g_mdps[1]);
+	*z = (int16_t)(g_mdps[2]);
 	*temp = gtemp;
+}
+
+// external interface
+void get_gyro_raw_data(int16_t *x, int16_t *y, int16_t *z)
+{
+	*x = (int16_t)(g_sns[0]);
+	*y = (int16_t)(g_sns[1]);
+	*z = (int16_t)(g_sns[2]);
 }
 
 static void handle_imu(void *p1, void *p2, void *p3)
@@ -648,7 +729,7 @@ static void handle_imu(void *p1, void *p2, void *p3)
 
 	err = recover_i2c_bus();
 	if (err) {
-        LOG_ERR("Unable to recover bus. Continuing, but expect issues.");
+		LOG_ERR("Unable to recover bus. Continuing, but expect issues.");
 	}
 
 	rec_count = load_recovery_count();
@@ -656,6 +737,9 @@ static void handle_imu(void *p1, void *p2, void *p3)
 	if (rec_count >= MAX_RECOVERY_BOOTS) {
 		LOG_ERR("Unable to recover i2c bus after 10 resets. Will stop trying.");
 	}
+
+	load_accel_calibration(a_cal);
+	LOG_INF("Accel calibration: (%d, %d, %d)", a_cal[0], a_cal[1], a_cal[2]);
 
 	load_gyro_calibration(g_cal);
 	LOG_INF("Gyro calibration: (%d, %d, %d)", g_cal[0], g_cal[1], g_cal[2]);
@@ -678,17 +762,27 @@ static void handle_imu(void *p1, void *p2, void *p3)
 	LOG_INF("Starting imu loop");
 
 	for (;;) {
-		if (reset_cal) {
+		if (reset_acal) {
+			a_cal[0] = 0;
+			a_cal[1] = 0;
+			a_cal[2] = 0;
+			reset_windowed_average(&ax_hist);
+			reset_windowed_average(&ay_hist);
+			reset_windowed_average(&az_hist);
+			reset_acal = false;
+			samples = 0;
+		}
+		if (reset_gcal) {
 			g_cal[0] = 0;
 			g_cal[1] = 0;
 			g_cal[2] = 0;
 			reset_windowed_average(&gx_hist);
 			reset_windowed_average(&gy_hist);
 			reset_windowed_average(&gz_hist);
-			reset_cal = false;
+			reset_gcal = false;
 			samples = 0;
 		}
-		err = process_data(a_raw, g_raw, a_cal, g_cal, &temp);
+		err = process_data(a_mgs, a_sns, g_mdps, g_sns, a_cal, g_cal, &temp);
 		if (!err) {
 			samples++;
 			if (samples > HIST_LEN) {
@@ -706,8 +800,12 @@ static void handle_imu(void *p1, void *p2, void *p3)
 			count++;
 			if (count >= (DEBUG_PRINT_PERIOD / IMU_ODR) ){
 				count = 0;
-				LOG_DBG("Accl %d, %d, %d", a_raw[0], a_raw[1], a_raw[2]);
-				LOG_DBG("Gyro %d, %d, %d", g_raw[0], g_raw[1], g_raw[2]);
+				LOG_DBG("Accl %d, %d, %d; sensor: %d, %d, %d",
+						a_mgs[0], a_mgs[1], a_mgs[2],
+						a_sns[0], a_sns[1], a_sns[2]);
+				LOG_DBG("Gyro %d, %d, %d; sensor: %d, %d, %d",
+						g_mdps[0], g_mdps[1], g_mdps[2],
+						g_sns[0], g_sns[1], g_sns[2]);
 				LOG_DBG("Temp %d", temp_decicentigrade);
 			}
 		}
@@ -717,6 +815,41 @@ static void handle_imu(void *p1, void *p2, void *p3)
 
 #if defined(CONFIG_SHELL)
 
+static int cmd_accelcal(const struct shell *sh, size_t argc, char **argv)
+{
+	int err;
+
+	if (argc >= 2) {
+		if (strncmp(argv[1], "reset", 5) == 0) {
+			shell_print(sh, "Resetting accel calibration to 0.");
+			k_sem_take(&imu_data_ready, K_SECONDS(10));
+			reset_acal = true;
+		} else {
+			shell_error(sh, "Unknown option: %s", argv[1]);
+			return 0;
+		}
+	}
+
+	shell_print(sh, "Calibrating accelerometer...");
+
+	err = k_sem_take(&imu_data_ready, K_SECONDS(10));
+	if (err) {
+		shell_error(sh, "Error waiting for data: %d", err);
+	} else {
+		a_cal[0] = a_mgs[0] - 1000; // force to indicate +1000mg (1 Earth g downwards; +x axis at the bottom)
+		a_cal[1] = a_mgs[1];
+		a_cal[2] = a_mgs[2];
+		err = store_accel_calibration(a_cal);
+		shell_print(sh, "New calibration: (%d, %d, %d)", a_cal[0], a_cal[1], a_cal[2]);
+		if (err) {
+			shell_error(sh, "Unable to store calibration: %d", err);
+		}
+		shell_print(sh, "Done.");
+	}
+
+	return 0;
+}
+
 static int cmd_gyrocal(const struct shell *sh, size_t argc, char **argv)
 {
 	int err;
@@ -725,7 +858,7 @@ static int cmd_gyrocal(const struct shell *sh, size_t argc, char **argv)
 		if (strncmp(argv[1], "reset", 5) == 0) {
 			shell_print(sh, "Resetting gyroscope calibration to 0.");
 			k_sem_take(&imu_data_ready, K_SECONDS(10));
-			reset_cal = true;
+			reset_gcal = true;
 		} else {
 			shell_error(sh, "Unknown option: %s", argv[1]);
 			return 0;
@@ -738,9 +871,9 @@ static int cmd_gyrocal(const struct shell *sh, size_t argc, char **argv)
 	if (err) {
 		shell_error(sh, "Error waiting for data: %d", err);
 	} else {
-		g_cal[0] = g_raw[0];
-		g_cal[1] = g_raw[1];
-		g_cal[2] = g_raw[2];
+		g_cal[0] = g_mdps[0];
+		g_cal[1] = g_mdps[1];
+		g_cal[2] = g_mdps[2];
 		err = store_gyro_calibration(g_cal);
 		shell_print(sh, "New calibration: (%d, %d, %d)", g_cal[0], g_cal[1], g_cal[2]);
 		if (err) {
@@ -752,7 +885,8 @@ static int cmd_gyrocal(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
-SHELL_CMD_ARG_REGISTER(gyrocal, NULL,  SHELL_HELP("Calibrate the gyroscope", "gyrocal [<reset>]"), cmd_gyrocal, 1, 1);
+SHELL_CMD_ARG_REGISTER(accelcal, NULL,  SHELL_HELP("Calibrate the accelerometer with card stationary and +X axis downward", "accelcal [<reset>]"), cmd_accelcal, 1, 1);
+SHELL_CMD_ARG_REGISTER(gyrocal, NULL,  SHELL_HELP("Calibrate the gyroscope with card stationary", "gyrocal [<reset>]"), cmd_gyrocal, 1, 1);
 #endif
 
 K_THREAD_DEFINE(imu_id, IMU_THREAD_STACK_SIZE, handle_imu, NULL, NULL, NULL, IMU_THREAD_PRIORITY, 0, 0);
