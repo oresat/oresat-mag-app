@@ -536,7 +536,7 @@ static int read_gyro_data(int16_t *x, int16_t *y, int16_t *z)
 		LOG_ERR("Error reading X1: %d", ret);
 		return ret;
 	}
-	*x = (uint16_t)b0 | (((uint16_t)b1) << 8);
+	*x = ((uint16_t)b0 | (uint16_t)b1) << 8;
 
 	ret = imu_read_reg(REG_GYRO_DATA_Y0, &b0);
 	if (ret < 0) {
@@ -548,7 +548,7 @@ static int read_gyro_data(int16_t *x, int16_t *y, int16_t *z)
 		LOG_ERR("Error reading Y1: %d", ret);
 		return ret;
 	}
-	*y = (uint16_t)b0 | (((uint16_t)b1) << 8);
+	*y = ((uint16_t)b0 | (uint16_t)b1) << 8;
 
 	ret = imu_read_reg(REG_GYRO_DATA_Z0, &b0);
 	if (ret < 0) {
@@ -560,7 +560,7 @@ static int read_gyro_data(int16_t *x, int16_t *y, int16_t *z)
 		LOG_ERR("Error reading Z1: %d", ret);
 		return ret;
 	}
-	*z = (uint16_t)b0 | (((uint16_t)b1) << 8);
+	*z = ((uint16_t)b0 | (uint16_t)b1) << 8;
 
 	return ret;
 }
@@ -581,7 +581,7 @@ static int read_temp_data(int16_t *temp)
 		LOG_ERR("Error reading TEMP1: %d", ret);
 		return ret;
 	}
-	*temp = (uint16_t)b0 | (((uint16_t)b1) << 8);
+	*temp = ((uint16_t)b0 | (uint16_t)b1) << 8;
 	return ret;
 }
 
@@ -612,10 +612,19 @@ static int process_data(int16_t *x, int16_t *y, int16_t *z, int16_t gxcal, int16
 	return 0;
 }
 
+// external interface; the sensor axes are rotated w.r.t. to the satellite frame of reference,
+// so adjust this here -- that way the main magnetorquer thread can work with either IMU
+
+// correct the orientation to be in the spacecraft frame of reference,
+// not the sensor IC frame of reference
+// sensor +x is satellite +y
+// sensor -y is satellite +x
+// sensor +z is satellite +z
+
 void get_gyro_data(int16_t *x, int16_t *y, int16_t *z, int16_t *temp)
-{
-	*x = (int16_t)(GYRO_UNIT_SCALE * gx_raw / RAW_GYRO_OUT_SCALE);  // convert to 0.001 degrees / second (milli-degrees per second)
-	*y = (int16_t)(GYRO_UNIT_SCALE * gy_raw / RAW_GYRO_OUT_SCALE);
+{   									   // (32767 / 15.625f)
+	*x = -(int16_t)(GYRO_UNIT_SCALE * gy_raw / RAW_GYRO_OUT_SCALE);  // convert to 0.001 degrees / second (milli-degrees per second)
+	*y = (int16_t)(GYRO_UNIT_SCALE * gx_raw / RAW_GYRO_OUT_SCALE);
 	*z = (int16_t)(GYRO_UNIT_SCALE * gz_raw / RAW_GYRO_OUT_SCALE);
 	*temp = gtemp;
 }
@@ -753,7 +762,7 @@ static int cmd_gyrocal(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
-SHELL_CMD_ARG_REGISTER(gyrocal, NULL,  SHELL_HELP("Calibrate the gyroscope", "gyrocal [<reset>]"), cmd_gyrocal, 1, 1);
+SHELL_CMD_ARG_REGISTER(gyrocal, NULL,  SHELL_HELP("Calibrate the gyroscope with card stationary", "gyrocal [<reset>]"), cmd_gyrocal, 1, 1);
 #endif
 
 K_THREAD_DEFINE(imu_id, IMU_THREAD_STACK_SIZE, handle_imu, NULL, NULL, NULL, IMU_THREAD_PRIORITY, 0, 0);

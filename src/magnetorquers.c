@@ -40,7 +40,7 @@ LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_DBG);
 #define MAGNETORQUER_STARTUP_DELAY 2000			// roughly when all the helper threads are up; TODO: add interthread signalling for this
 #define ITERATION_PERIOD 5						// ms
 #define DEBUG_PRINT_PERIOD 1500					// ms
-#define MAGNETORQUER_UPDATE_PERIOD 100          // ms
+#define MAGNETORQUER_UPDATE_PERIOD 100  		// ms
 #define MT_LOOP_PRINT_PERIOD 100
 #define ISENSE_GAIN 50.0f						// gain of the INA185 op amp
 #define ISENSE_R_OHMS 0.030f					// resistance between the op amp + and - inputs
@@ -389,7 +389,7 @@ static int32_t control_current(const int32_t target_uA, int axis)
 	float out;
 	mt_pwm_phase_data_t *data = &g_adcs_data.mt_pwm_data[axis];
 
-	// if command is 0, nothing to do; just reset internal vars 
+	// if command is 0, nothing to do; just reset internal vars
 	if (target_uA == 0) {
 		data->integral = 0; // reset integral -- not needed until target_uA > 0.
 		data->error = 0;
@@ -473,14 +473,16 @@ static int get_accel_readings(three_axis_data *axes)
 				  &ay,
 				  &az);
 
-	// correct the orientation to be in the spacecraft frame of reference,
-	// not the sensor IC frame of reference
-	// sensor +x is satellite +y
-	// sensor -y is satellite +x
-	// sensor +z is satellite +z
-	axes->x = -ay;
-	axes->y = ax;
+	axes->x = ax;
+	axes->y = ay;
 	axes->z = az;
+
+	get_accel_raw_data(&ax,
+					   &ay,
+					   &az);
+	axes->x_raw = ax;
+	axes->y_raw = ay;
+	axes->z_raw = az;
 
 	return 0;
 }
@@ -498,14 +500,16 @@ static int get_gyro_readings(three_axis_data *axes, int16_t *temp_data)
 				  &gz,
 				  temp_data);
 
-	// correct the orientation to be in the spacecraft frame of reference,
-	// not the sensor IC frame of reference
-	// sensor +x is satellite +y
-	// sensor -y is satellite +x
-	// sensor +z is satellite +z
-	axes->x = -gy;
-	axes->y = gx;
+	axes->x = gx;
+	axes->y = gy;
 	axes->z = gz;
+
+	get_gyro_raw_data(&gx,
+					  &gy,
+					  &gz);
+	axes->x_raw = gx;
+	axes->y_raw = gy;
+	axes->z_raw = gz;
 
 	return 0;
 }

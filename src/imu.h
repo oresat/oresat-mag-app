@@ -7,7 +7,13 @@ bool is_imu_ready(void);
 // temp is in centigrade
 void get_gyro_data(int16_t *x, int16_t *y, int16_t *z, int16_t *temp);
 
+// original sensor driver value from IMU
+void get_gyro_raw_data(int16_t *x, int16_t *y, int16_t *z);
+
 // x, y, and z are in units of milli-Gs
 void get_accel_data(int16_t *x, int16_t *y, int16_t *z);
+
+// original sensor driver value from IMU
+void get_accel_raw_data(int16_t *x, int16_t *y, int16_t * z);
 
 #endif
