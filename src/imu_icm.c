@@ -221,7 +221,7 @@ static void load_gyro_calibration(int16_t *gxcal, int16_t *gycal, int16_t *gzcal
 	rc2 = settings_load_one("gy_cal", (void *)gycal, sizeof(*gycal));
 	rc3 = settings_load_one("gz_cal", (void *)gzcal, sizeof(*gzcal));
 
-	if (rc1 || rc2 || rc3) {
+	if (rc1 < 0 || rc2 < 0 || rc3 < 0) {
 		LOG_WRN("No gyroscope calibration found in settings. Rebuild with shell and run gyrocal.");
 	}
 }
@@ -629,6 +629,13 @@ void get_gyro_data(int16_t *x, int16_t *y, int16_t *z, int16_t *temp)
 	*temp = gtemp;
 }
 
+void get_gyro_raw_data(int16_t *x, int16_t *y, int16_t *z)
+{
+	*x = 0;
+	*y = 0;
+	*z = 0;
+}
+
 void get_accel_data(int16_t *x, int16_t *y, int16_t *z)
 {
 	// not supported in this temporary implementation
@@ -636,6 +643,15 @@ void get_accel_data(int16_t *x, int16_t *y, int16_t *z)
 	*y = 0;
 	*z = 0;
 }
+
+// original sensor driver value from IMU
+void get_accel_raw_data(int16_t *x, int16_t *y, int16_t * z)
+{
+	*x = 0;
+	*y = 0;
+	*z = 0;
+}
+
 
 static void handle_imu(void *p1, void *p2, void *p3)
 {
