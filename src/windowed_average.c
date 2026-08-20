@@ -32,7 +32,7 @@ int32_t update_windowed_average(wnd_avg_store *store, int32_t new_datum)
 	int32_t i;
 
 	// throw out oldest sample
-	for (i = store->hist_buffer_len - 1; i >= 0; i--) {
+	for (i = store->hist_buffer_len - 2; i >= 0; i--) {
 		store->hist_buffer[i + 1] = store->hist_buffer[i];
 	}
 
