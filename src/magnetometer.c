@@ -107,7 +107,7 @@ struct rm3100_sensor_ctx {
 	// Sensor instance per Zephyr device tree source parsing:
 	uint32_t dt_instance;
 	// Sensor I2C address:
-	uint32_t reg;
+	uint32_t reg[1];
 	// Param to map order of sensor discovery in device tree with object dictionary order:
 	int32_t obj_dict_order;
 	// Structs to connect sensor to Zephyr RTIO sub-system:
@@ -261,7 +261,8 @@ static int32_t mag_axis_to_mag_index(const end_card_magnetometer_t axis)
 	// Assign return code rc with current state "error no such device":
 	rc = -ENODEV;
 	for (idx = 0; idx < ARRAY_SIZE(rm3100_ctx); idx++) {
-		if (rm3100_ctx[idx].reg == reg) {
+		// if (rm3100_ctx[idx].reg == reg) {
+		if (rm3100_ctx[idx].reg[0] == reg) {
 			mag_idx_fs[axis] = idx;
 			rc = 0;
 			LOG_INF("matched mag axis %d with mag sensor array"
@@ -286,7 +287,7 @@ static int32_t mag_sensor_summary(void)
 
 	for (uint32_t i = 0; i < ARRAY_SIZE(rm3100_ctx); i++) {
 		LOG_INF("rm3100 dt instance %d has I2C device address %02X",
-			rm3100_ctx[i].dt_instance, rm3100_ctx[i].reg);
+			rm3100_ctx[i].dt_instance, rm3100_ctx[i].reg[0]);
 	}
 
 	return rc;
