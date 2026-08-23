@@ -176,6 +176,9 @@ static int32_t control_current(const int32_t target_uA, int axis);
 
 static unsigned board_rev;
 
+// Symbol to reduce the frequency of magnatorquer fault messages:
+#define MAGNETORQUER_LOG_PERIOD_CYCLES 10000000
+
 /**************************************************/
 
 static int init_gpios(void)
@@ -719,7 +722,8 @@ static int reset_magnetorquer(void)
 static int init_magnetorquer(void) {
 	int err;
 
-	num_mags_detected(&num_mags_fs);
+	// num_mags_detected(&num_mags_fs);
+	num_mags_fs = num_mags_detected();
 
 	init_windowed_average(&g_adcs_data.mt_pwm_data[0].ofs_mv_store,
 						  g_adcs_data.mt_pwm_data[0].ofs_mv_buffer, HIST_LEN, "adcx");
@@ -817,19 +821,17 @@ static int init_magnetorquer(void) {
 	return err;
 }
 
-#define MAGNETORQUER_LOG_PERIOD_CYCLES 10000000
-
 static void check_magnetorquer_fault(void)
 {
 	int fault;
 	static uint32_t fault_count = 0;
-	static uint32_t sys_uptime_present = MAGNETORQUER_LOG_PERIOD_CYCLES;
-	static uint32_t sys_uptime_previous = 0;
+	static uint64_t sys_uptime_present = MAGNETORQUER_LOG_PERIOD_CYCLES;
+	static uint64_t sys_uptime_previous = 0;
 
 	fault = gpio_pin_get_dt(&n_mt_en_fault);
 	if (!fault) {
 		fault_count++;
-		sys_uptime_present = k_cycle_get_32();
+		sys_uptime_present = k_uptime_get();
 
 		if ((sys_uptime_present - sys_uptime_previous) >= MAGNETORQUER_LOG_PERIOD_CYCLES) {
 			LOG_WRN("Fault on magnetorquer driver(s)!");

@@ -158,6 +158,8 @@ DT_INST_FOREACH_STATUS_OKAY(MAG_ADD_SENSOR_TO_TABLE)
 
 #undef DT_DRV_COMPAT
 
+static uint32_t mag_idx_fs[ARRAY_SIZE(rm3100_ctx)] = { 0 };
+
 //----------------------------------------------------------------------
 // - SECTION - routines
 //----------------------------------------------------------------------
@@ -182,9 +184,9 @@ static int gpios_init(void)
     return ret;
 }
 
-void num_mags_detected(uint32_t *num_mags)
+uint32_t num_mags_detected(void)
 {
-	*num_mags = ARRAY_SIZE(rm3100_ctx);
+	return ARRAY_SIZE(rm3100_ctx);
 }
 
 // TODO [ ] Ask whether this commented function is needed or can be removed:
@@ -196,6 +198,12 @@ static void stop_end_cap_magnetometers(void) {
 #endif
 
 /**
+ * @brief Internal API to map magnetometers by their axis / I2C sensor address
+ *  to their index in this module's array of magnetometers.
+ *
+ * @note magnetometer axis-to-index mapping happens as part of module
+ *  initialization, creating a look-up table.
+ *
  * @note In the main branch at commit 4bf8bee004, device tree source aliases
  *  mag0 to the magnetometer with I2C device address 0x20, and aliases mag1 to
  *  the device node with I2C device address 0x22.  Further, that code associates
@@ -218,7 +226,7 @@ static void stop_end_cap_magnetometers(void) {
  *  no sensors were detected at build time.
  */
 
-int32_t mag_axis_to_mag_index(const end_card_magnetometer_t axis, uint32_t *mag_idx)
+static int32_t mag_axis_to_mag_index(const end_card_magnetometer_t axis)
 {
 	uint32_t reg = 0;
 	uint32_t idx = 0;
@@ -254,10 +262,10 @@ int32_t mag_axis_to_mag_index(const end_card_magnetometer_t axis, uint32_t *mag_
 	rc = -ENODEV;
 	for (idx = 0; idx < ARRAY_SIZE(rm3100_ctx); idx++) {
 		if (rm3100_ctx[idx].reg == reg) {
-			*mag_idx = idx;
+			mag_idx_fs[axis] = idx;
 			rc = 0;
 			LOG_INF("matched mag axis %d with mag sensor array"
-				"idx %u", axis, *mag_idx);
+				"idx %u", axis, mag_idx_fs[axis]);
 			break;
 		}
 	}
@@ -314,20 +322,28 @@ static const struct device *check_rm3100_sensor(const struct device *rm3100_dev)
 
 int init_mag(void)
 {
-	int ret;
 	uint32_t count = 1;
 	int32_t rc = 0;
 
+	// TODO [ ] Remove mag sensor summary for production code:
 	rc = mag_sensor_summary();
 	if (rc < 0) {
 		LOG_WRN("dev-only magnetometer summary report failed, err %d", rc);
 	}
 
+	for (uint32_t i = 0; i <= ARRAY_SIZE(rm3100_ctx); i++) {
+		rc = mag_axis_to_mag_index(i);
+		if (rc != 0 ) {
+			LOG_ERR("Failed to map mag axis to index of sensor array, err %d", rc);
+			goto done;
+		}
+	}
+
 	k_msleep(500);
 	LOG_INF("Initializing magnetometers");
-	ret = gpios_init();
-	if (ret < 0) {
-		LOG_ERR("Unable to initialize magnetometer gpio pins: %d", ret);
+	rc = gpios_init();
+	if (rc < 0) {
+		LOG_ERR("Unable to initialize magnetometer gpio pins: %d", rc);
 		return -ENODEV;
 	}
 
@@ -352,21 +368,22 @@ int init_mag(void)
 	// cannot do if the device is powered off.
 	uint32_t idx = 0;
 	for (idx = 0; idx < ARRAY_SIZE(rm3100_ctx); idx++) {
-		ret = device_init(rm3100_ctx[idx].dev);
-		if (ret < 0) {
-			LOG_ERR("Error initializing rm3100 device driver: %d", ret);
+		rc = device_init(rm3100_ctx[idx].dev);
+		if (rc < 0) {
+			LOG_ERR("Error initializing rm3100 device driver: %d", rc);
 			rm3100_ctx[idx].status_ok = false;
 		} else if (check_rm3100_sensor(rm3100_ctx[idx].dev) == NULL) {
 			LOG_ERR("Could not find RM3100 magnetometer, dt instance %u",
 				rm3100_ctx[idx].dt_instance);
-			ret = -ENODEV;
+			rc = -ENODEV;
 			rm3100_ctx[idx].status_ok = false;
 		} else {
 			rm3100_ctx[idx].status_ok = true;
 		}
 	}
 
-	return ret;
+done:
+	return rc;
 }
 
 int get_mag_reading(int mag_num, int32_t *x, int32_t *y, int32_t *z)
@@ -388,9 +405,11 @@ int get_mag_reading(int mag_num, int32_t *x, int32_t *y, int32_t *z)
 	particular ordering of those sensors.
 	*/
 
-	uint32_t idx = 0;
+	// TODO [ ] Consider renaming 'mag_num' to a name reflecting that
+	//          mag_num refers to the axis for which the magnetometer is
+	//          responsible to measure.
+	uint32_t idx = mag_idx_fs[mag_num];
 	int32_t rc = 0;
-	rc = mag_axis_to_mag_index(mag_num, &idx);
 	if (rc != 0) {
 		LOG_ERR("Failed to get index to sensor with mag axis %d, err %d",
 			mag_num, rc);
