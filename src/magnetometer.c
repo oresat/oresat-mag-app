@@ -258,7 +258,8 @@ static int32_t mag_axis_to_mag_index(const end_card_magnetometer_t axis)
 	}
 
 	// Now we search for a sensor with known I2C device address (reg property) value.
-	// Assign return code rc with current state "error no such device":
+	// Assign return code rc with current state "error no such device", to
+	// prime the loop for case where a corresponding reg value is not found:
 	rc = -ENODEV;
 	for (idx = 0; idx < ARRAY_SIZE(rm3100_ctx); idx++) {
 		// if (rm3100_ctx[idx].reg == reg) {
