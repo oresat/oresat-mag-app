@@ -2,7 +2,7 @@
 #define _MAGNETOMETER_H_
 
 // Note:
-// - EC stands for End Cap, as in "end cap card".
+// - EC stands for End Cap, a daughter board to Oresat end cards.
 // - PZ stands for positive z-axis.
 // - MZ stands for negative z-axis.
 
@@ -17,6 +17,6 @@ typedef enum {
 
 int get_mag_reading(int mag_num, int32_t *x, int32_t *y, int32_t *z);
 
-void num_mags_detected(uint32_t *num_mags);
+uint32_t num_mags_detected(void);
 
 #endif // _MAGNETOMETER_H_
