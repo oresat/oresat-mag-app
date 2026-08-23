@@ -833,6 +833,9 @@ static void check_magnetorquer_fault(void)
 		fault_count++;
 		sys_uptime_present = k_uptime_get();
 
+		// Note, uptime wrap-around not a concern here, as uint64_t
+		// maximum value represents more the 580 million years when
+		// taken in units of milliseconds:
 		if ((sys_uptime_present - sys_uptime_previous) >= MAGNETORQUER_LOG_PERIOD_CYCLES) {
 			LOG_WRN("Fault on magnetorquer driver(s)!");
 			sys_uptime_previous = sys_uptime_present;
