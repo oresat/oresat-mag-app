@@ -197,85 +197,6 @@ static void stop_end_cap_magnetometers(void) {
 }
 #endif
 
-/**
- * @brief Internal API to map magnetometers by their axis / I2C sensor address
- *  to their index in this module's array of magnetometers.
- *
- * @note magnetometer axis-to-index mapping happens as part of module
- *  initialization, creating a look-up table.
- *
- * @note In the main branch at commit 4bf8bee004, device tree source aliases
- *  mag0 to the magnetometer with I2C device address 0x20, and aliases mag1 to
- *  the device node with I2C device address 0x22.  Further, that code associates
- *  the enum element EC_MAG_0_PZ_1 with mag0, and enum element EC_MAG_1_PZ_2
- *  with mag1.
- *
- *  In order to support calls to get_mag_reading(idx, *x, *y, *z), the
- *  following routine maps magnetometer axis enum values to the corresponding
- *  mag sensor context struct in this module.  The array of these context
- *  structs is populated by a Zephyr 'foreach' device tree macro, which doesn't
- *  guarantee the order of the device nodes it finds at compile time.  For this
- *  reason, a run time look-up function is needed.
- *
- * @param axis, the name position of the caller's magnetometer of interest
- * @param mag_idx, a variable to hold an array index to an enabled magnetometer
- *  sensor.
- *
- * @retval 0 on success.  Sensor array index returned in mag_idx.
- * @retval -ENODEV when magnetometer array holds no sensor contexts, meaning
- *  no sensors were detected at build time.
- */
-
-static int32_t mag_axis_to_mag_index(const end_card_magnetometer_t axis)
-{
-	uint32_t reg = 0;
-	uint32_t idx = 0;
-	int32_t rc = 0;
-
-	if (ARRAY_SIZE(rm3100_ctx) < 1) {
-		return -ENODEV;
-	}
-
-	switch(axis)
-	{
-	// Note these case statement axis-to-i2c-addr associations are taken
-	// from mag app main branch, commit hash 4bf8bee004:
-	case EC_MAG_0_PZ_1:
-		reg = 0x20;
-		break;
-	case EC_MAG_1_PZ_2:
-		reg = 0x22;
-		break;
-	default:
-		// If axis does not match a defined case, that input is invalid.
-		rc = -EINVAL;
-	}
-
-	if (rc != 0) {
-		LOG_ERR("Failed to map mag axis to discovered sensor, err %d",
-		        rc);
-		goto done;
-	}
-
-	// Now we search for a sensor with known I2C device address (reg property) value.
-	// Assign return code rc with current state "error no such device", to
-	// prime the loop for case where a corresponding reg value is not found:
-	rc = -ENODEV;
-	for (idx = 0; idx < ARRAY_SIZE(rm3100_ctx); idx++) {
-		// if (rm3100_ctx[idx].reg == reg) {
-		if (rm3100_ctx[idx].reg[0] == reg) {
-			mag_idx_fs[axis] = idx;
-			rc = 0;
-			LOG_INF("matched mag axis %d with mag sensor array"
-				"idx %u", axis, mag_idx_fs[axis]);
-			break;
-		}
-	}
-
-done:
-	return rc;
-}
-
 // A development time routine, may be removed to prepare for production code:
 
 static int32_t mag_sensor_summary(void)
@@ -318,6 +239,44 @@ static const struct device *check_rm3100_sensor(const struct device *rm3100_dev)
 	return rm3100_dev;
 }
 
+/**
+ * @brief "set up" routine to map magnetometer I2C sensor addresses to effective
+ *  sensor axes.
+ */
+
+static int32_t init_indices_to_mags(void)
+{
+	uint32_t reg = 0;
+	uint32_t rc = 0;
+
+	for (uint32_t i = 0; i < ARRAY_SIZE(rm3100_ctx); i++) {
+		reg = rm3100_ctx[i].reg[0];
+		switch (reg)
+		{
+		case 0x20:
+			mag_idx_fs[i] = EC_MAG_0_PZ_1;
+			break;
+		case 0x22:
+			mag_idx_fs[i] = EC_MAG_1_PZ_2;
+			break;
+		case 0x21:
+			mag_idx_fs[i] = EC_MAG_2_MZ_1;
+			break;
+		case 0x23:
+			mag_idx_fs[i] = EC_MAG_3_MZ_2;
+			break;
+		default:
+			LOG_ERR("Failed to map mag sensor I2C addr to axes, reg = 0x%X", reg);
+			rc = -EINVAL;
+		}
+		if (rc < 0) {
+			break;
+		}
+	}
+
+	return rc;
+}
+
 // TODO [ ] Determine whether it makes sense to enable the use of mempool for
 //          this RM3100 magnetometer module:
 // RTIO_DEFINE_WITH_MEMPOOL(ez_io, SQ_SZ, CQ_SZ, N, SAMPLE_SIZE, 4);
@@ -331,14 +290,6 @@ int init_mag(void)
 	rc = mag_sensor_summary();
 	if (rc < 0) {
 		LOG_WRN("dev-only magnetometer summary report failed, err %d", rc);
-	}
-
-	for (uint32_t i = 0; i <= ARRAY_SIZE(rm3100_ctx); i++) {
-		rc = mag_axis_to_mag_index(i);
-		if (rc != 0 ) {
-			LOG_ERR("Failed to map mag axis to index of sensor array, err %d", rc);
-			goto done;
-		}
 	}
 
 	k_msleep(500);
@@ -384,7 +335,6 @@ int init_mag(void)
 		}
 	}
 
-done:
 	return rc;
 }
 
@@ -457,6 +407,12 @@ static void handle_mag(void *p1, void *p2, void *p3)
 	k_sleep(K_MSEC(MAG_STARTUP_DELAY));
 
 	LOG_INF("Starting MAG thread");
+
+	rc = init_indices_to_mags();
+	if (rc < 0) {
+		LOG_ERR("Failed to map magnetometer(s) to their axes");
+		return;
+	}
 
 	rc = init_mag();
 	if (rc < 0) {
