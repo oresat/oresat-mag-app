@@ -111,7 +111,7 @@ struct rm3100_sensor_ctx {
 	// Param to map order of sensor discovery in device tree with object dictionary order:
 	int32_t obj_dict_order;
 	// Structs to connect sensor to Zephyr RTIO sub-system:
-	const struct rtio_iodev *iodev;
+	struct rtio_iodev *iodev;
 	struct rtio *rtio_ctx;
 	// Encoded magntometer readings obtained directly from sensor:
 	uint8_t readings[READINGS_BUFFER_SIZE];
