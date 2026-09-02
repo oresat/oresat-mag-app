@@ -63,7 +63,7 @@ LOG_MODULE_REGISTER(imu, CONFIG_SENSOR_LOG_LEVEL);
 #define IMU_STARTUP_DELAY 500
 #define IMU_ITERATION_PERIOD 90 // ms -- a bit more fast than the ODR -- will wait for interrupt (polled)
 #define IMU_ODR 100 // Hz
-#define DEBUG_PRINT_PERIOD  100 // 1s
+#define DEBUG_PRINT_PERIOD  500 // 1s
 
 // 15.625 degrees / second full scale range
 #define GYRO_FULL_SCALE_RANGE_BIT BIT_GYRO_UI_FS_15_625
@@ -115,7 +115,7 @@ static int check_i2c_device_presence(uint8_t addr)
 	/* Send the address to read from */
 	msgs[0].buf = &dst;
 	msgs[0].len = 0U;
-	msgs[0].flags = I2C_MSG_WRITE | I2C_MSG_STOP;
+	msgs[0].flags = I2C_MSG_READ | I2C_MSG_STOP;
 	if (i2c_transfer(i2c, &msgs[0], 1, addr) == 0) {
 		LOG_DBG("Device detected on i2c bus at 0x%02x", addr);
 		return 0;
@@ -137,14 +137,15 @@ static int imu_write_reg(uint16_t full_addr, uint8_t val)
 			LOG_ERR("Unable to write IMU bank register: %d", ret);
 			return ret;
 		}
-		prev_bank = bank;
 	}
 
 	ret = i2c_reg_write_byte(i2c, imu_addr, addr, val);
 	if (ret < 0) {
 		LOG_ERR("Unable to write IMU register bank %u, addr 0x%02x, data 0x%02x: %d",
 				bank, addr, val, ret);
+		return ret;
 	}
+	prev_bank = bank;
 	return ret;
 }
 
@@ -221,7 +222,7 @@ static void load_gyro_calibration(int16_t *gxcal, int16_t *gycal, int16_t *gzcal
 	rc2 = settings_load_one("gy_cal", (void *)gycal, sizeof(*gycal));
 	rc3 = settings_load_one("gz_cal", (void *)gzcal, sizeof(*gzcal));
 
-	if (rc1 || rc2 || rc3) {
+	if ((rc1 < 0) || (rc2 < 0) || (rc3 < 0)) {
 		LOG_WRN("No gyroscope calibration found in settings. Rebuild with shell and run gyrocal.");
 	}
 }
@@ -248,9 +249,9 @@ static int store_gyro_calibration(int16_t *gxcal, int16_t *gycal, int16_t *gzcal
 }
 #endif
 
-static int reset_imu(void)
+static int reset_icm(void)
 {
-	int ret;
+	int ret = 0;
 	int attempt;
 	uint8_t int_status;
 	int rec_count;
@@ -258,37 +259,48 @@ static int reset_imu(void)
 	rec_count = load_recovery_count();
 
 	for (attempt = 1; attempt < SOFT_RESET_RETRIES; attempt++) {
+		LOG_INF("Attempting I2C bus recovery");
+		ret = i2c_recover_bus(DEVICE_DT_GET(DT_NODELABEL(flexcomm0_lpi2c0)));
+		if (ret == -ENOSYS) {
+			LOG_WRN("I2C bus recovery is not implemented. Giving up.");
+			ret = 0;
+			break;
+		} else if (ret) {
+			LOG_WRN("I2C bus is stuck (err: %d); recovery failed", ret);
+		} else {
+			LOG_INF("I2C bus recovered");
+		}
+
+		k_msleep(5 * attempt);
+
+		prev_bank = 0xff; // force bank switch to correct bank
 		ret = imu_write_reg(REG_DEVICE_CONFIG, BIT_SOFT_RESET_CONFIG);
 		k_msleep(10 * attempt); /* must sleep > 1 ms before any other register access */
 		if (ret < 0) {
 			LOG_ERR("Attempt %d: error soft resetting IMU: %d", attempt++, ret);
-			continue;
 		} else {
 			LOG_INF("Soft reset the IMU...");
-		}
-		for (int i = 0; i < SOFT_RESET_READY_TRIES; i++) {
-			ret = imu_read_reg(REG_INT_STATUS, &int_status);
-			if (ret < 0) {
-				LOG_ERR("Error reading int status: %d", ret);
-			} else {
-				if (int_status & BIT_RESET_DONE_INT) {
-					LOG_INF("Soft reset complete.");
+
+			for (int i = 0; i < SOFT_RESET_READY_TRIES; i++) {
+				ret = imu_read_reg(REG_INT_STATUS, &int_status);
+				if (ret < 0) {
+					LOG_ERR("Error reading int status: %d", ret);
+				} else {
+					if (int_status & BIT_RESET_DONE_INT) {
+						LOG_INF("Soft reset complete.");
+						break;
+					}
+				}
+				k_msleep(5 * (i + 1));
+			}
+
+			if (!ret) {
+				if ((int_status & BIT_RESET_DONE_INT)) {
+					LOG_INF("I2C bus recovery successful.");
 					break;
 				}
+				// TODO: test this, then add sync to data ready int
 			}
-			k_msleep(50 * (i + 1));
-		}
-		if (!ret) {
-			if ((int_status & BIT_RESET_DONE_INT)) {
-				LOG_INF("I2C bus recovery successful.");
-				break;
-			}
-			// TODO: test this, then add sync to data ready int
-		}
-		LOG_INF("Recovering i2c bus");
-		ret = i2c_recover_bus(DEVICE_DT_GET(DT_NODELABEL(flexcomm0_lpi2c0)));
-		if (ret) {
-			LOG_WRN("I2C bus is stuck (err: %d); recovery failed", ret);
 		}
 		k_msleep(50 * attempt); // increase the time each loop, just in case that helps recovery
 	}
@@ -298,7 +310,7 @@ static int reset_imu(void)
 			store_recovery_count(rec_count + 1);
 			settings_commit();
 			k_msleep(500); // give settings time to be written to flash
-			__ASSERT(ret < 0, "Giving up on soft reset of IMU. Rebooting.");
+			__ASSERT(ret < 0, "Giving up on 	soft reset of IMU. Rebooting.");
 		} else {
 			LOG_ERR("Cannot recover i2c bus after 10 reboot attempts. Giving up.");
 		}
@@ -308,6 +320,47 @@ static int reset_imu(void)
 			store_recovery_count(0); // reset since we're good
 		}
 		LOG_INF("IMU has been reset.");
+	}
+
+	return ret;
+}
+
+static int init_icm(void)
+{
+	int ret = 0;
+
+	imu_is_ready = false;
+
+	while (!imu_is_ready) {
+		if (check_i2c_device_presence(IMU_DEVICE_ADDR) == 0) {
+			LOG_INF("Device detected on i2c bus at 0x%02x", IMU_DEVICE_ADDR);
+			imu_addr = IMU_DEVICE_ADDR;
+		} else {
+			LOG_INF("Device NOT detected on i2c bus at 0x%02x", IMU_DEVICE_ADDR);
+			LOG_ERR("No device found");
+			ret = -ENODEV;
+		}
+		if (!ret) { // we could read something from the I2C bus, which is good; try the ID register
+			uint8_t buf = 0;
+
+			ret = imu_read_reg(REG_WHO_AM_I, &buf);
+			if (ret < 0) {
+				LOG_ERR("Error reading IMU WHOAMI register: %d", ret);
+			} else if (buf != WHO_AM_I_ICM42688) {
+				LOG_ERR("WHOAMI register returned 0x%02x, not 0x%02x", buf, WHO_AM_I_ICM42688);
+				return -ENXIO;
+			} else {
+				LOG_INF("IMU detected.");
+				imu_is_ready = true;
+				break;
+			}
+		}
+
+		// we could not read something from the I2C bus at all, so try to recover the bus
+		ret = reset_icm();
+		if (ret) { // i2c bus recovery failed, so give up
+			break;
+		}
 	}
 
 	return ret;
@@ -334,7 +387,6 @@ static int init_imu(void)
 		return ret;
 	}
 
-	imu_is_ready = false;
 	i2c = DEVICE_DT_GET(DT_NODELABEL(flexcomm0_lpi2c0)); //i2c-0));
 
 	if (!device_is_ready(i2c)) {
@@ -342,36 +394,7 @@ static int init_imu(void)
 			return -ENODEV;
 	}
 
-	if (check_i2c_device_presence(IMU_DEVICE_ADDR) == 0) {
-		LOG_INF("Device detected on i2c bus at 0x%02x", IMU_DEVICE_ADDR);
-		imu_addr = IMU_DEVICE_ADDR;
-	} else {
-		LOG_INF("Device NOT detected on i2c bus at 0x%02x", IMU_DEVICE_ADDR);
-		if (check_i2c_device_presence(IMU_DEVICE_ADDR_ALT) == 0) {
-			LOG_INF("Device detected on i2c bus at 0x%02x", IMU_DEVICE_ADDR_ALT);
-			imu_addr = IMU_DEVICE_ADDR_ALT;
-		} else {
-			LOG_INF("Device NOT detected on i2c bus at 0x%02x", IMU_DEVICE_ADDR_ALT);
-			LOG_ERR("No device found at either address");
-			return -ENODEV;
-		}
-	}
-
-	uint8_t buf = 0;
-
-	ret = imu_read_reg(REG_WHO_AM_I, &buf);
-	if (ret < 0) {
-		LOG_ERR("Error reading IMU WHOAMI register: %d", ret);
-		return ret;
-	}
-
-	if (buf != WHO_AM_I_ICM42688) {
-		LOG_ERR("WHOAMI register returned 0x%02x, not 0x%02x", buf, WHO_AM_I_ICM42688);
-		return -ENXIO;
-	}
-	LOG_INF("IMU detected.");
-	imu_is_ready = true;
-	return reset_imu();
+	return init_icm(); // now try to contact the ICM42688 chip
 }
 
 /**
