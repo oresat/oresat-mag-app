@@ -10,7 +10,7 @@
  */
 /dts-v1/;
 
-#include <nxp/nxp_mcxn94x.dtsi>
+#include <nxp/mcx/nxp_mcxn94x.dtsi>
 #include "mcxn947_breakoutcard.dtsi"
 #include <zephyr/dt-bindings/adc/adc.h>
 #include <zephyr/dt-bindings/adc/mcux-lpadc.h>
@@ -222,6 +222,8 @@ zephyr_udc0: &usb1 {
 };
 
 &lpcmp0 {
+	positive-mux-input = "IN0";
+	negative-mux-input = "IN1";
 	status = "okay";
 };
 

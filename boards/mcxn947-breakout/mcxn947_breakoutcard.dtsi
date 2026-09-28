@@ -23,22 +23,6 @@
 			status = "okay";
 		};
 	};
-
-	gpio_keys {
-		compatible = "gpio-keys";
-		user_button_2: button_0 {
-			label = "User SW2";
-			gpios = <&gpio0 23 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
-			zephyr,code = <INPUT_KEY_0>;
-			status = "disabled";
-		};
-		user_button_3: button_1 {
-			label = "User SW3";
-			gpios = <&gpio0 6 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
-			zephyr,code = <INPUT_KEY_1>;
-			status = "disabled";
-		};
-	};
 };
 
 &flexcomm3_lpspi3 {
@@ -57,12 +41,6 @@
 	pinctrl-0 = <&pinmux_flexcomm0_lpi2c>;
 	pinctrl-names = "default";
 	clock-frequency = <I2C_BITRATE_STANDARD>;
-
-	bme280: bme280@77 {
-		compatible = "bosch,bme280";
-		reg = <0x77>;
-        status = "okay";
-	};
 };
 
 &flexcomm4_lpuart4 {
