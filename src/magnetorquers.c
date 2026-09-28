@@ -344,6 +344,12 @@ static void print_debug_output(void) {
 					(double)data->feedback_measurement_V * 1000.0);
 		}
 		// LOG_DBG( "  CO_EM_GENERIC_ERROR:  %u", CO_isError(CO->em, CO_EM_GENERIC_ERROR));
+
+#if defined(CONFIG_SYS_HEAP_RUNTIME_STATS)
+		extern void print_heap_stats(void);
+
+		print_heap_stats();
+#endif
 	}
 }
 

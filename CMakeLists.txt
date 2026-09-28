@@ -55,5 +55,6 @@ target_sources_ifdef(CONFIG_MAGNETORQUERS app PRIVATE src/magnetorquers.c)
 target_sources_ifdef(CONFIG_CAN_INTF     app PRIVATE src/can.c)
 target_sources_ifdef(CONFIG_CAN_INTF     app PRIVATE src/can_util.c)
 target_sources_ifdef(CONFIG_CAN_INTF     app PRIVATE objdict/CO_OD.c)
+target_sources_ifdef(CONFIG_SYS_HEAP_RUNTIME_STATS app PRIVATE src/heap_stats.c)
 zephyr_include_directories(objdict)
 
