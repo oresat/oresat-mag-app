@@ -49,7 +49,7 @@
 #include "windowed_average.h"
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(imu_icm, CONFIG_SENSOR_LOG_LEVEL);
+LOG_MODULE_REGISTER(imu_icm, CONFIG_MAG_IMU_LOG_LEVEL);
 
 #define IMU_DEVICE_ADDR 0x68 // I2C 7 bit address
 #define IMU_DEVICE_ADDR_ALT 0x69 // I2C 7 bit address

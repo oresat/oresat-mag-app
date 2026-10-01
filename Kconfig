@@ -8,6 +8,12 @@ menu "Oresat MCXN947 Mag Card"
 		help
 		  Enable use of DAC.
 
+	if DAC_INTF
+		module = MAG_DAC
+		module-str = Mag DAC
+		source "subsys/logging/Kconfig.template.log_config"
+	endif # DAC_INTF
+
 	config ADC_INTF
 		bool "Enable monitoring one or more ADC channels."
 		select ADC
@@ -19,7 +25,6 @@ menu "Oresat MCXN947 Mag Card"
 		  Outputs the data scaled to mV.
 
 	if ADC_INTF
-
 		config SEQUENCE_SAMPLES
 			int "Number of samples to be made on the sequence for each channel."
 			default 1
@@ -36,82 +41,112 @@ menu "Oresat MCXN947 Mag Card"
 			bool "ADC data sequences are on 32bits"
 			default n
 
+		module = MAG_ADC
+		module-str = Mag ADC
+		source "subsys/logging/Kconfig.template.log_config"
 	endif  # ADC_INTF
 
-config PWM_INTF
-	bool "Enable PWM output."
-	select PWM
-	help
-	  Enable use of PWMs.
+	config PWM_INTF
+		bool "Enable PWM output."
+		select PWM
+		help
+		  Enable use of PWMs.
 
-config BLINK
-	bool "Blink an LED"
-	default y
-	help
-	  Enable the thread which blinks an LED.
+	if PWM_INTF
+		module = MAG_PWM
+		module-str = Mag PWM
+		source "subsys/logging/Kconfig.template.log_config"
+	endif # PWM_INTF
 
-config MAG
-	bool "Enable magnetometer sampling and transfer"
-	default y
-	help
-	  Enable the Magnetometer handling.
+	config BLINK
+		bool "Blink an LED"
+		default y
+		help
+		  Enable the thread which blinks an LED.
 
-config IMU_ICM
-	bool
-	help
-	  Use the ICM-42688 in-app driver.
+	if BLINK
+		module = MAG_BLINK
+		module-str = Mag Blink
+		source "subsys/logging/Kconfig.template.log_config"
+	endif # BLINK
 
-config IMU_BMI
-	bool
-	help
-	  Use the BMI-270 Zephyr driver.
+	config MAG
+		bool "Enable magnetometer sampling and transfer"
+		default y
+		help
+		  Enable the Magnetometer handling.
 
-config IMU
-	bool "Enable IMU sampling and transfer"
-	default y
-	select IMU_ICM if !BMI270
-	select IMU_BMI if BMI270
-	help
-	  Enable the IMU handling. BMI270 is automatically enabled
-	  if the device tree includes an i2c node with
-	  compatible = "bosch,bmi270". Otherwise we use our
-	  ICM driver implemented in user app code rather than an
-	  actual Zephyr driver.
+	if MAG
+		module = MAG_MM
+		module-str = Mag Magnetometer
+		source "subsys/logging/Kconfig.template.log_config"
+	endif # MAG
 
-config MAGNETORQUERS
-	bool "Enable magetorquer control"
-	default y
-	select DAC_INTF
-	select ADC_INTF
-	select PWM_INTF
-	help
-	  Enable the driving the magnetorquers from CAN requests.
+	config IMU_ICM
+		bool
+		help
+		  Use the ICM-42688 in-app driver.
 
-	if MAGNETORQUERS && SHELL
+	config IMU_BMI
+		bool
+		help
+		  Use the BMI-270 Zephyr driver.
 
-	   config MAGNETORQUER_EXPLORE
-		   bool "Enable interaction with target_uA or PWM while monitoring current."
-		   help
-			 If The shell is also enabled, provide interactive means to experiment
-			 with various target currents or pwm output, while onboard ADC
-			 current measurements provide feedback.
+	config IMU
+		bool "Enable IMU sampling and transfer"
+		default y
+		select IMU_ICM if !BMI270
+		select IMU_BMI if BMI270
+		help
+		  Enable the IMU handling. BMI270 is automatically enabled
+		  if the device tree includes an i2c node with
+		  compatible = "bosch,bmi270". Otherwise we use our
+		  ICM driver implemented in user app code rather than an
+		  actual Zephyr driver.
 
-	endif	# MAGNETORQUERS
+	if IMU
+		module = MAG_IMU
+		module-str = Mag IMU
+		source "subsys/logging/Kconfig.template.log_config"
+	endif # IMU
 
+	config MAGNETORQUERS
+		bool "Enable magetorquer control"
+		default y
+		select DAC_INTF
+		select ADC_INTF
+		select PWM_INTF
+		help
+		  Enable the driving the magnetorquers from CAN requests.
 
-config CAN_INTF
-	bool "Enable sending CAN packets."
-	default y
-	select CAN
-	select CANOPENNODE
-	select USE_STM32_HAL_FLASH if SOC_STM32F091XC
-	select USE_STM32_HAL_FLASH_EX if SOC_STM32F091XC
-	select USE_STM32_HAL_CAN if SOC_STM32F091XC
-	help
-	  Enable CAN interface and send data from CO_OD.
+	if MAGNETORQUERS
+		if SHELL
+			config MAGNETORQUER_EXPLORE
+				bool "Enable interaction with target_uA or PWM while monitoring current."
+				help
+				  If The shell is also enabled, provide interactive means to experiment
+				  with various target currents or pwm output, while onboard ADC
+				  current measurements provide feedback.
+		endif # SHELL
+
+		module = MAG_TQ
+		module-str = Mag TQ
+		source "subsys/logging/Kconfig.template.log_config"
+	endif   # MAGNETORQUERS
+
+	config CAN_INTF
+		bool "Enable sending CAN packets."
+		default y
+		select CAN
+		select CANOPEN
+		select CANOPENNODE
+		select USE_STM32_HAL_FLASH if SOC_STM32F091XC
+		select USE_STM32_HAL_FLASH_EX if SOC_STM32F091XC
+		select USE_STM32_HAL_CAN if SOC_STM32F091XC
+		help
+		  Enable CAN interface and send data from CO_OD.
 
 	if CAN_INTF && !SOC_STM32F091XC
-
 		config MCUBOOT_ALLOWED
 			bool "MCUboot allowed."
 			default y
@@ -138,9 +173,22 @@ config CAN_INTF
 			  If enabled, do not perform normal functions if CAN node id
 			  is not stored in settings.
 
+		module = MAG_CAN
+		module-str = Mag CAN
+		source "subsys/logging/Kconfig.template.log_config"
 	endif
 
+	# the gpio.c module is always enabled
+	if GPIO
+		module = MAG_GPIO
+		module-str = Mag GPIO
+		source "subsys/logging/Kconfig.template.log_config"
+	endif # GPIO
 
 endmenu
+
+module = MAG_APP
+module-str = Mag App
+source "subsys/logging/Kconfig.template.log_config"
 
 source "Kconfig.zephyr"

@@ -27,7 +27,7 @@
 #include "windowed_average.h"
 #include "magnetorquers.h"
 
-LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(magnetorquers, CONFIG_MAG_TQ_LOG_LEVEL);
 
 /* size of stack area used by each thread */
 #define STACK_SIZE 4096

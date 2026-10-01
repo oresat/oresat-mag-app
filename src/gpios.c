@@ -10,7 +10,7 @@
 
 #include "gpios.h"
 
-LOG_MODULE_REGISTER(gpios, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(gpios, CONFIG_MAG_GPIO_LOG_LEVEL);
 
 /* === GPIO data === */
 #define BP_NODE DT_NODELABEL(maggpios)

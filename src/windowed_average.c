@@ -3,7 +3,7 @@
 #include "windowed_average.h"
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(windowed_average, CONFIG_LOG_DEFAULT_LEVEL);
+LOG_MODULE_REGISTER(windowed_average, CONFIG_MAG_APP_LOG_LEVEL);
 
 // change to 1 to log the store
 #define EXTRA_VERBOSE 0

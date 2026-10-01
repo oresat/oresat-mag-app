@@ -14,7 +14,7 @@
 #include "can_util.h"
 #include "gpios.h"
 
-LOG_MODULE_REGISTER(can_thread, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(can_thread, CONFIG_MAG_CAN_LOG_LEVEL);
 
 #define CAN_INTERFACE (DEVICE_DT_GET(DT_CHOSEN(zephyr_canbus)))
 #define CAN_BITRATE (DT_PROP_OR(DT_CHOSEN(zephyr_canbus), bitrate, \
@@ -108,10 +108,13 @@ static void handle_can(void *p1, void *p2, void *p3)
 				LOG_ERR("Failed to confirm MCUboot image: %d", rc);
 			}
 		} else {
-			LOG_ERR("Self-tests failed. Rebooting to revert firmware...");
+			LOG_ERR("Self-tests failed.");
 			k_msleep(500); // Let logs flush
 #if defined(CONFIG_REBOOT)
+			LOG_ERR("Rebooting to revert firmware...");
 			sys_reboot(SYS_REBOOT_COLD);
+#else
+			LOG_ERR("Please reboot to revert firmware.");
 #endif
 		}
 	} else {

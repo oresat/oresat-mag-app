@@ -22,7 +22,7 @@
 
 #include "magnetometer.h"
 
-LOG_MODULE_REGISTER(magnetometer, CONFIG_SENSOR_LOG_LEVEL);
+LOG_MODULE_REGISTER(magnetometer, CONFIG_MAG_MM_LOG_LEVEL);
 
 #define N		(8)
 #define M		(N/2)

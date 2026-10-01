@@ -10,7 +10,7 @@
 #include "imu.h"
 
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(imu_bmi, CONFIG_SENSOR_LOG_LEVEL);
+LOG_MODULE_REGISTER(imu_bmi, CONFIG_MAG_IMU_LOG_LEVEL);
 
 /**
  * From the mag requirements doc, which reigns supreme not this
