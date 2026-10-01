@@ -2,10 +2,18 @@
 
 OreSat Zephyr app for the mag card.
 
-This card hosts both the magnetorquers and the magnetometers.
+This card hosts an IMU on board, with interfaces to external
+magnetorquer coils and magnetometers.
 
-A separate reaction-wheel board with its own app will be
-physically attached to the mag card.
+The magnetorquer coils connect to the card via J3, J4, and J5.
+
+The magnetometers are located on the +Z and optionally also the -Z
+end caps, which are daughter boards to the +Z and -Z end cards. The
+signals to them are MAG_PWR, MAG_SCL, and MAG_SDA, which route over
+the backplane -- there are NO connectors for them on the mag card.
+Further, these signals are only usable when the mag card and end card(s)
+are powered by the OPD over the backplane -- you cannot test the
+magnetometers with the mag card only powered by the debug connector.
 
 # Building and flashing
 Ensure you are in the `mag` directory (`cd src/oresat/firmware/apps/mag`) prior to building.
@@ -91,9 +99,27 @@ Commands:
   The value is then stored in the settings partition, so as long as you do not do a full chip erase,
   it will be remembered.
 
+- `accelcal [reset]`<enter> to do initial accelerometer calibration without the reset option.
+  NOTE: this command is not implemented for the ICM-42688 interface on mag card v1.0.0.
+
+  The unit must be stationary, with it vertical (as if it were plugged into the satellite backplane),
+  with the backplane connector J1 lowermost, and the debug connector J2 uppermost. In other words,
+  the +X axis should be downward towards the center of the Earth.
+  The command without the reset option takes approximately 1 second to run.
+
+  If the accelerometer has already been calibrated, add the optional reset parameter: `accelcal reset`<enter>.
+  This will take approximately 10 seconds to run.
+
+  Once calibrated, the values obtained are considered an offset from 0 to be subtracted from future
+  measurements. Like the `nodeid`, the calibration values are stored in the settings partition.
+
 - `gyrocal [reset]`<enter> to do initial gyroscope calibration without the reset option.
-  The unit must be stationary.
+
+  The unit must be stationary. The command without the reset option takes approximately 1 second to run.
+
   If the gyroscope has already been calibrated, add the optional reset parameter: `gyrocal reset`<enter>.
+  This will take approximately 10 seconds to run.
+
   Once calibrated, the values obtained are considered an offset from 0 to be subtracted from future
   measurements. Like the `nodeid`, the calibration values are stored in the settings partition.
 
