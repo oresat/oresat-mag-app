@@ -33,42 +33,42 @@ LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_INF);
 /* scheduling priority used by each thread */
 #define PRIORITY 7
 
-#define HIST_LEN 10								// number of current reading samples to use for running average
+#define HIST_LEN 10			// number of current reading samples to use for running average
 
-#define MAGNETORQUER_STARTUP_DELAY 2000			// roughly when all the helper threads are up; TODO: add interthread signalling for this
-#define ITERATION_PERIOD 5						// ms
-#define DEBUG_PRINT_PERIOD 1500					// ms
-#define MAGNETORQUER_UPDATE_PERIOD 100          // ms
+#define MAGNETORQUER_STARTUP_DELAY 2000	// roughly when all the helper threads are up; TODO: add interthread signalling for this
+#define ITERATION_PERIOD 5		// ms
+#define DEBUG_PRINT_PERIOD 1500		// ms
+#define MAGNETORQUER_UPDATE_PERIOD 100	// ms
 #define MT_LOOP_PRINT_PERIOD 100
-#define ISENSE_GAIN 50.0f						// gain of the INA185 op amp
-#define ISENSE_R_OHMS 0.030f					// resistance between the op amp + and - inputs
-#define VSENSE_INPUT_OFFSET_TYP_UV 5			// typically, the INA185 can have +/- this many microvolts offset on the input (pre-gain)
-#define VSENSE_INPUT_OFFSET_MAX_UV 55			// maximum offset in microvolts -- even when no current is flowing through Rsense
+#define ISENSE_GAIN 50.0f		// gain of the INA185 op amp
+#define ISENSE_R_OHMS 0.030f		// resistance between the op amp + and - inputs
+#define VSENSE_INPUT_OFFSET_TYP_UV 5	// typically, the INA185 can have +/- this many microvolts offset on the input (pre-gain)
+#define VSENSE_INPUT_OFFSET_MAX_UV 55	// maximum offset in microvolts -- even when no current is flowing through Rsense
 
 #define ZEPHYR_USER_NODE DT_PATH(zephyr_user)
-#define DAC_RANGE 4096							// TODO: use real value from device tree
+#define DAC_RANGE 4096			// TODO: use real value from device tree
 #define DAC_VREF 3.3f
 #if (DT_NODE_HAS_PROP(ZEPHYR_USER_NODE, r58_ohms))
 #define R1_OHMS DT_PROP(ZEPHYR_USER_NODE, r58_ohms)
 #else
-#define R1_OHMS 237								// R58 should have been 23.7K -- NOTE: might be defined below based on device tree
+#define R1_OHMS 237			// R58 should have been 23.7K -- NOTE: might be defined below based on device tree
 #endif
-#define R2_OHMS 1000							// R59
-#define R_SENSE_TOTAL (2 * ISENSE_R_OHMS)		// shown in schematic, a second ISENSE_R_OHMS is in series from the op amp - input to ground
-#define MAGNETORQUER_CURRENT_LIMIT_A 2.0f		// specified in schematic
+#define R2_OHMS 1000			// R59
+#define R_SENSE_TOTAL (2 * ISENSE_R_OHMS)	// shown in schematic, a second ISENSE_R_OHMS is in series from the op amp - input to ground
+#define MAGNETORQUER_CURRENT_LIMIT_A 2.0f	// specified in schematic
 
-#define VREF (MAGNETORQUER_CURRENT_LIMIT_A * R_SENSE_TOTAL)				// input to STSPIN250; with a total of 0.060 ohm sense resistance = ISENSE_R_OHMS * 2, this limits output current to 2A
-#define VOUT ((VREF * (R1_OHMS + R2_OHMS)) / R2_OHMS)					// calculate needed input V to voltage divider to get out desired Vref
+#define VREF (MAGNETORQUER_CURRENT_LIMIT_A * R_SENSE_TOTAL)	// input to STSPIN250; with a total of 0.060 ohm sense resistance = ISENSE_R_OHMS * 2, this limits output current to 2A
+#define VOUT ((VREF * (R1_OHMS + R2_OHMS)) / R2_OHMS)		// calculate needed input V to voltage divider to get out desired Vref
 #define MT_ILIM_DAC_VALUE ((uint32_t)((VOUT * DAC_RANGE) / DAC_VREF))	// convert that to a raw DAC value
 
 #define MAX_PWM_DUTY_CYCLE_X 10000
 #define MAX_PWM_DUTY_CYCLE_Y 10000
 #define MAX_PWM_DUTY_CYCLE_Z 10000
 
-#define OPERATING_VBUSP_MV 8200					// set Kff so that we get maximum possible current at 100% duty cycle for mid-point of battery voltage
-#define R_X_MT 15.5								// DC resistance of X axis magnetorquer
-#define R_Y_MT 15.5								// DC resistance of Y axis magnetorquer
-#define R_Z_MT 60.0								// DC resistance of Z axis magnetorquer
+#define OPERATING_VBUSP_MV 8200		// set Kff so that we get maximum possible current at 100% duty cycle for mid-point of battery voltage
+#define R_X_MT 15.5			// DC resistance of X axis magnetorquer
+#define R_Y_MT 15.5			// DC resistance of Y axis magnetorquer
+#define R_Z_MT 60.0			// DC resistance of Z axis magnetorquer
 
 static const int32_t max_i_ua[] = {
 	(int32_t)((OPERATING_VBUSP_MV * 1000) / R_X_MT),
@@ -157,6 +157,8 @@ static char *axis_names[] = {
 	"X", "Y", "Z"
 };
 
+static uint32_t num_mags_fs = 0;
+
 /* === GPIO data === */
 #define BP_NODE DT_NODELABEL(maggpios)
 
@@ -173,6 +175,9 @@ static const struct gpio_dt_spec hw_rev_bit_2 = GPIO_DT_SPEC_GET(BP_NODE, hw_rev
 static int32_t control_current(const int32_t target_uA, int axis);
 
 static unsigned board_rev;
+
+// Symbol to reduce the frequency of magnatorquer fault messages:
+#define MAGNETORQUER_LOG_PERIOD_CYCLES 10000000
 
 /**************************************************/
 
@@ -504,7 +509,7 @@ static int get_mag_readings(three_axis_data *axes)
 	int32_t my;
 	int32_t mz;
 
-	for (i = 0; i < NUM_MAGS; i++) {
+	for (i = 0; i < num_mags_fs; i++) {
 		int ret = get_mag_reading(i, &mx, &my, &mz); // get readings in milligauss
 		if (ret) {
 			err = ret; // be sure to report any errors, even just 1
@@ -717,6 +722,9 @@ static int reset_magnetorquer(void)
 static int init_magnetorquer(void) {
 	int err;
 
+	// num_mags_detected(&num_mags_fs);
+	num_mags_fs = num_mags_detected();
+
 	init_windowed_average(&g_adcs_data.mt_pwm_data[0].ofs_mv_store,
 						  g_adcs_data.mt_pwm_data[0].ofs_mv_buffer, HIST_LEN, "adcx");
 	init_windowed_average(&g_adcs_data.mt_pwm_data[1].ofs_mv_store,
@@ -816,10 +824,22 @@ static int init_magnetorquer(void) {
 static void check_magnetorquer_fault(void)
 {
 	int fault;
+	static uint32_t fault_count = 0;
+	static uint64_t sys_uptime_present = MAGNETORQUER_LOG_PERIOD_CYCLES;
+	static uint64_t sys_uptime_previous = 0;
 
 	fault = gpio_pin_get_dt(&n_mt_en_fault);
 	if (!fault) {
-		LOG_WRN("Fault on magnetorquer driver(s)!");
+		fault_count++;
+		sys_uptime_present = k_uptime_get();
+
+		// Note, uptime wrap-around not a concern here, as uint64_t
+		// maximum value represents more the 580 million years when
+		// taken in units of milliseconds:
+		if ((sys_uptime_present - sys_uptime_previous) >= MAGNETORQUER_LOG_PERIOD_CYCLES) {
+			LOG_WRN("Fault on magnetorquer driver(s)!");
+			sys_uptime_previous = sys_uptime_present;
+		}
 
 		// TODO: ask Andrew if this is ok to do. It wasn't in the old code.
 		// LOG_INF("Resetting magnetorquer drivers.");

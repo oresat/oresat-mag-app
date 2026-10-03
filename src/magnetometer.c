@@ -24,24 +24,28 @@
 
 LOG_MODULE_REGISTER(magnetometer, CONFIG_SENSOR_LOG_LEVEL);
 
+#define MAG_THREAD_STACK_SIZE 4096
+#define MAG_THREAD_PRIORITY 0
+extern const k_tid_t mag_id;
+
+K_MUTEX_DEFINE(mag_data_mtx);
+
 #define N		(8)
 #define M		(N/2)
 #define SQ_SZ		(N)
 #define CQ_SZ		(N)
-
-#define MAG0_NODE	DT_ALIAS(mag0)
-#define MAG1_NODE	DT_ALIAS(mag1)
 
 #define SAMPLE_PERIOD	1.0 / DT_PROP(MAG0_NODE, odr)
 #define SAMPLE_SIZE	1
 
 #define PROCESS_TIME	((M - 1) * SAMPLE_PERIOD)
 
-// - DEV 0402 -
 #define READINGS_BUFFER_SIZE 256
 
 #define MAG_STARTUP_DELAY 750
 #define RM3100_DEMO_SLEEP_TIME_MS 1000
+
+#define MAG_GET_READING_TIMEOUT_MS 1000
 
 /* === GPIO data === */
 #define BP_NODE DT_NODELABEL(maggpios)
@@ -55,14 +59,106 @@ static const struct gpio_dt_spec n_mag_en = GPIO_DT_SPEC_GET(BP_NODE, n_mag_en_g
 static const struct gpio_dt_spec n_mag_fault = GPIO_DT_SPEC_GET(BP_NODE, n_mag_fault_gpios);
 static const struct gpio_dt_spec mag_ready = GPIO_DT_SPEC_GET(BP_NODE, mag_ready_gpios);
 
-static struct sensor_three_axis_data mag_data[NUM_MAGS];
+/**
+ * @brief Zephyr DTS macros, and macros based on them, used to construct code
+ *  for each magnetometer node with status equal to "okay".
+ *
+ * @note Normally used only in Zephyr drivers, here we define DT_DRV_COMPAT to
+ *  match our magnetometer's DTS compatible property value.  (Our sensor is the
+ *  RM3100.)  We leave this defined long enough to use a device tree "foreach"
+ *  type of macro, to generate code constructs for each device tree node with
+ *  this sensor enabled.
+ */
 
-#define MAG_THREAD_STACK_SIZE 4096
-#define MAG_THREAD_PRIORITY 0
-extern const k_tid_t mag_id;
+#define DT_DRV_COMPAT pni_rm3100
 
-static bool mag_0_good;
-static bool mag_1_good;
+// Create the two basic, static-qualified RTIO structs which each magnetometer
+// needs, in order to interface with Zephyr's real time I/O sub-system.  Note
+// that these structs are described in zephyr/include/zephyr/sensor.h.
+
+#define MAG_CREATE_IODEV_AND_CONTEXT_STRUCT(inst) \
+SENSOR_DT_READ_IODEV(iodev_##inst, DT_ALIAS(mag##inst),  \
+                {SENSOR_CHAN_MAGN_X, 0},          \
+                {SENSOR_CHAN_MAGN_Y, 0},          \
+                {SENSOR_CHAN_MAGN_Z, 0},          \
+                {SENSOR_CHAN_MAGN_XYZ, 0});       \
+RTIO_DEFINE(ctx_##inst, 1, 1);
+
+DT_INST_FOREACH_STATUS_OKAY(MAG_CREATE_IODEV_AND_CONTEXT_STRUCT)
+
+// Create a decoder struct instance for each enabled magnetometer:
+
+#define MAG_CREATE_DECODER(inst) \
+const struct sensor_decoder_api decoder_##inst;
+
+DT_INST_FOREACH_STATUS_OKAY(MAG_CREATE_DECODER)
+
+// Sensor context struct, to organize run-time state and connections of a
+// sensor to the RTIO sub-system and application code.
+//
+// See https://github.com/zephyrproject-rtos/zephyr/blob/1f6485eca25431b5ff27ce9a754218c9e559bbbb/include/zephyr/drivers/sensor_data_types.h#L42
+// for Zephyr 4.4.1 three-axis data struct details.
+
+struct rm3100_sensor_ctx {
+	// Zephyr device handle, pointing to struct of basic device attributes:
+	const struct device *const dev;
+	// Run time sensor status (as opposed to initialization status):
+	bool status_ok;
+	// Sensor instance per Zephyr device tree source parsing:
+	uint32_t dt_instance;
+	// Sensor I2C address:
+	uint32_t reg[1];
+	// Param to map order of sensor discovery in device tree with object dictionary order:
+	int32_t obj_dict_order;
+	// Structs to connect sensor to Zephyr RTIO sub-system:
+	struct rtio_iodev *iodev;
+	struct rtio *rtio_ctx;
+	// Encoded magntometer readings obtained directly from sensor:
+	uint8_t readings[READINGS_BUFFER_SIZE];
+	// Decoded magnetometer readings:
+	struct sensor_three_axis_data mag_data;
+	// TODO [ ] Explain this parameter used in mag reading decoding:
+	uint32_t mag_fit;
+	// Following pre-refactor code each sensor gets its own decoder instance:
+        const struct sensor_decoder_api *decoder;
+};
+
+// Macro to create array entry based on sensor context struct:
+// Note: the pattern 'mag##inst' must match the form of magnetometer device
+//  node aliases in this app's device tree sources.
+
+#define MAG_ADD_SENSOR_TO_TABLE(inst)                 \
+{                                                     \
+	.dev = DEVICE_DT_GET(DT_ALIAS(mag##inst)),    \
+	.status_ok = false,                           \
+	.dt_instance = inst,                          \
+	/* - 0811 - build time warning about "braces around scalar initializer": */ \
+	.reg = DT_PROP(DT_ALIAS(mag##inst), reg),     \
+	.obj_dict_order = 0,                          \
+	.iodev = &iodev_##inst,                       \
+	.rtio_ctx = &ctx_##inst,                      \
+	.readings = { 0 },                            \
+	.mag_data = {                                 \
+		.header = { 0 },                      \
+		.shift = 0,                           \
+		.readings = {                         \
+			{                             \
+				.timestamp_delta = 0, \
+				.values = { 0 },      \
+			},                            \
+		},                                    \
+	},                                            \
+	.mag_fit = 0,                                 \
+	.decoder = &decoder_##inst,                   \
+},
+
+static struct rm3100_sensor_ctx rm3100_ctx[] = {
+DT_INST_FOREACH_STATUS_OKAY(MAG_ADD_SENSOR_TO_TABLE)
+};
+
+#undef DT_DRV_COMPAT
+
+static uint32_t mag_idx_fs[ARRAY_SIZE(rm3100_ctx)] = { 0 };
 
 //----------------------------------------------------------------------
 // - SECTION - routines
@@ -88,12 +184,36 @@ static int gpios_init(void)
     return ret;
 }
 
+uint32_t num_mags_detected(void)
+{
+	return ARRAY_SIZE(rm3100_ctx);
+}
+
+// TODO [ ] Ask whether this commented function is needed or can be removed:
 #if 0
 static void stop_end_cap_magnetometers(void) {
 	//Disable power to the end cap magnetometers
 	gpio_pin_set_dt(&n_mag_en, false);
 }
 #endif
+
+// A development time routine, may be removed to prepare for production code:
+
+static int32_t mag_sensor_summary(void)
+{
+	int32_t rc = 0;
+
+	if (ARRAY_SIZE(rm3100_ctx) < 1) {
+		return -ENODEV;
+	}
+
+	for (uint32_t i = 0; i < ARRAY_SIZE(rm3100_ctx); i++) {
+		LOG_INF("rm3100 dt instance %d has I2C device address %02X",
+			rm3100_ctx[i].dt_instance, rm3100_ctx[i].reg[0]);
+	}
+
+	return rc;
+}
 
 static void start_end_cap_magnetometers(void) {
 	gpio_pin_set_dt(&n_mag_en, true);
@@ -109,47 +229,74 @@ static const struct device *check_rm3100_sensor(const struct device *rm3100_dev)
 	}
 
 	if (!device_is_ready(rm3100_dev)) {
-		LOG_ERR("\nError: Device \"%s\" is not ready; "
+		LOG_ERR("\nError: Device '%s' is not ready; "
 			"check the driver initialization logs for errors.",
 			rm3100_dev->name);
 		return NULL;
 	}
 
-	LOG_INF("Found device \"%s\"", rm3100_dev->name);
+	LOG_INF("Found device '%s'", rm3100_dev->name);
 	return rm3100_dev;
 }
 
+/**
+ * @brief "set up" routine to map magnetometer I2C sensor addresses to effective
+ *  sensor axes.
+ */
+
+static int32_t init_indices_to_mags(void)
+{
+	uint32_t reg = 0;
+	uint32_t rc = 0;
+
+	for (uint32_t i = 0; i < ARRAY_SIZE(rm3100_ctx); i++) {
+		reg = rm3100_ctx[i].reg[0];
+		switch (reg)
+		{
+		case 0x20:
+			mag_idx_fs[i] = EC_MAG_0_PZ_1;
+			break;
+		case 0x22:
+			mag_idx_fs[i] = EC_MAG_1_PZ_2;
+			break;
+		case 0x21:
+			mag_idx_fs[i] = EC_MAG_2_MZ_1;
+			break;
+		case 0x23:
+			mag_idx_fs[i] = EC_MAG_3_MZ_2;
+			break;
+		default:
+			LOG_ERR("Failed to map mag sensor I2C addr to axes, reg = 0x%X", reg);
+			rc = -EINVAL;
+		}
+		if (rc < 0) {
+			break;
+		}
+	}
+
+	return rc;
+}
+
+// TODO [ ] Determine whether it makes sense to enable the use of mempool for
+//          this RM3100 magnetometer module:
 // RTIO_DEFINE_WITH_MEMPOOL(ez_io, SQ_SZ, CQ_SZ, N, SAMPLE_SIZE, 4);
-
-SENSOR_DT_READ_IODEV(iodev, DT_COMPAT_GET_ANY_STATUS_OKAY(pni_rm3100),
-		{SENSOR_CHAN_MAGN_X, 0},
-		{SENSOR_CHAN_MAGN_Y, 0},
-		{SENSOR_CHAN_MAGN_Z, 0},
-		{SENSOR_CHAN_MAGN_XYZ, 0});
-
-RTIO_DEFINE(ctx, 1, 1);
-
-SENSOR_DT_READ_IODEV(iodev_b, DT_ALIAS(mag1),
-		{SENSOR_CHAN_MAGN_X, 0},
-		{SENSOR_CHAN_MAGN_Y, 0},
-		{SENSOR_CHAN_MAGN_Z, 0},
-		{SENSOR_CHAN_MAGN_XYZ, 0});
-
-RTIO_DEFINE(ctx_b, 1, 1);
-
-const struct device *const rm3100a_dev = DEVICE_DT_GET(MAG0_NODE);
-const struct device *const rm3100b_dev = DEVICE_DT_GET(MAG1_NODE);
 
 int init_mag(void)
 {
-	int ret;
 	uint32_t count = 1;
+	int32_t rc = 0;
+
+	// TODO [ ] Remove mag sensor summary for production code:
+	rc = mag_sensor_summary();
+	if (rc < 0) {
+		LOG_WRN("dev-only magnetometer summary report failed, err %d", rc);
+	}
 
 	k_msleep(500);
 	LOG_INF("Initializing magnetometers");
-	ret = gpios_init();
-	if (ret < 0) {
-		LOG_ERR("Unable to initialize magnetometer gpio pins: %d", ret);
+	rc = gpios_init();
+	if (rc < 0) {
+		LOG_ERR("Unable to initialize magnetometer gpio pins: %d", rc);
 		return -ENODEV;
 	}
 
@@ -172,40 +319,55 @@ int init_mag(void)
 	// we power up the mags before trying to talk to them. The init function for
 	// this sensor tries to read the revision ID register, which it obviously
 	// cannot do if the device is powered off.
-	ret = device_init(rm3100a_dev);
-	if (ret < 0) {
-		LOG_ERR("Error initializing rm3100a device driver: %d", ret);
-		mag_0_good = false;
-	} else if (check_rm3100_sensor(rm3100a_dev) == NULL) {
-		LOG_ERR("Could not find RM3100 magnetometer instance 'a'");
-		ret = -ENODEV;
-		mag_0_good = false;
-	} else {
-		mag_0_good = true;
+	uint32_t idx = 0;
+	for (idx = 0; idx < ARRAY_SIZE(rm3100_ctx); idx++) {
+		rc = device_init(rm3100_ctx[idx].dev);
+		if (rc < 0) {
+			LOG_ERR("Error initializing rm3100 device driver: %d", rc);
+			rm3100_ctx[idx].status_ok = false;
+		} else if (check_rm3100_sensor(rm3100_ctx[idx].dev) == NULL) {
+			LOG_ERR("Could not find RM3100 magnetometer, dt instance %u",
+				rm3100_ctx[idx].dt_instance);
+			rc = -ENODEV;
+			rm3100_ctx[idx].status_ok = false;
+		} else {
+			rm3100_ctx[idx].status_ok = true;
+		}
 	}
 
-#if (NUM_MAGS > 1)
-	ret = device_init(rm3100b_dev);
-	if (ret < 0) {
-		LOG_ERR("Error initializing rm3100b device driver: %d", ret);
-	} else if (check_rm3100_sensor(rm3100b_dev) == NULL) {
-		LOG_ERR("Could not find RM3100 magnetometer instance 'b'");
-		ret = -ENODEV;
-		mag_1_good = false;
-	} else {
-		mag_1_good = true;
-	}
-	ret = 0; // run without it
-#endif
-
-	return ret;
+	return rc;
 }
 
 int get_mag_reading(int mag_num, int32_t *x, int32_t *y, int32_t *z)
 {
-	if (mag_num >= NUM_MAGS) {
+	if (mag_num >= ARRAY_SIZE(rm3100_ctx)) {
 		return -EINVAL; // we don't support that one yet
 	}
+
+	if (k_mutex_lock(&mag_data_mtx, K_MSEC(MAG_GET_READING_TIMEOUT_MS)) == 0) {
+		/* mutex successfully locked */
+	} else {
+		LOG_ERR("Failed to lock mutex in get_mag_reading()");
+		return -EAGAIN;
+	}
+
+	/*
+	Convert magnetometer number to index to array of sensors element.
+	Sensors are discovered by device tree macros, which don't guarantee any
+	particular ordering of those sensors.
+	*/
+
+	// TODO [ ] Consider renaming 'mag_num' to a name reflecting that
+	//          mag_num refers to the axis for which the magnetometer is
+	//          responsible to measure.
+	uint32_t idx = mag_idx_fs[mag_num];
+	int32_t rc = 0;
+	if (rc != 0) {
+		LOG_ERR("Failed to get index to sensor with mag axis %d, err %d",
+			mag_num, rc);
+		goto done;
+	}
+
 	/*
 	The 32 bit value is shifted by the shift amount, but what that means in
 	practical terms is hard to figure out. See:
@@ -222,16 +384,23 @@ int get_mag_reading(int mag_num, int32_t *x, int32_t *y, int32_t *z)
 	What we want is to convert the reading to milligauss.
 	*/
 
-	*x = (int32_t)(SHIFT_Q31_TO_F32(mag_data[mag_num].readings[0].x, mag_data[mag_num].shift) * 1000.0f);
-	*y = (int32_t)(SHIFT_Q31_TO_F32(mag_data[mag_num].readings[0].y, mag_data[mag_num].shift) * 1000.0f);
-	*z = (int32_t)(SHIFT_Q31_TO_F32(mag_data[mag_num].readings[0].z, mag_data[mag_num].shift) * 1000.0f);
+	*x = (int32_t)(SHIFT_Q31_TO_F32(rm3100_ctx[idx].mag_data.readings[0].x,
+					rm3100_ctx[idx].mag_data.shift) * 1000.0f);
+	*y = (int32_t)(SHIFT_Q31_TO_F32(rm3100_ctx[idx].mag_data.readings[0].y,
+					rm3100_ctx[idx].mag_data.shift) * 1000.0f);
+	*z = (int32_t)(SHIFT_Q31_TO_F32(rm3100_ctx[idx].mag_data.readings[0].z,
+					rm3100_ctx[idx].mag_data.shift) * 1000.0f);
 
-	return 0;
+done:
+	k_mutex_unlock(&mag_data_mtx);
+
+	return rc;
 }
 
 static void handle_mag(void *p1, void *p2, void *p3)
 {
 	static uint32_t loop_count = 1;
+	uint32_t idx = 0;
 	int32_t rc = 0;
 
 	k_thread_name_set(mag_id, "mag_thread");
@@ -239,15 +408,17 @@ static void handle_mag(void *p1, void *p2, void *p3)
 
 	LOG_INF("Starting MAG thread");
 
-	rc = init_mag();
+	rc = init_indices_to_mags();
 	if (rc < 0) {
+		LOG_ERR("Failed to map magnetometer(s) to their axes");
 		return;
 	}
 
-	uint8_t buf[READINGS_BUFFER_SIZE] = {0};
-#if (NUM_MAGS > 1)
-	uint8_t buf_b[READINGS_BUFFER_SIZE] = {0};
-#endif
+	rc = init_mag();
+	if (rc < 0) {
+                return;
+	}
+
 	LOG_INF("Starting mag loop");
 
 	while (true) {
@@ -255,57 +426,38 @@ static void handle_mag(void *p1, void *p2, void *p3)
 			LOG_WRN("MAX892 mag power fault!");
 		}
 
-		if (mag_0_good) {
-			LOG_DBG("Reading mag 0");
-			rc = sensor_read(&iodev, &ctx, buf, 128);
-			if (rc != 0) {
-					LOG_ERR("%s: sensor_read() failed: %d", rm3100a_dev->name, rc);
+		for (uint32_t i = 0; i < ARRAY_SIZE(rm3100_ctx); i++) {
+			// Map our local loop index to sensor physical location id:
+			idx = mag_idx_fs[i];
+			if (rm3100_ctx[idx].status_ok) {
+				LOG_DBG("Reading mag '%s'", rm3100_ctx[idx].dev->name);
+				rc = sensor_read(rm3100_ctx[idx].iodev, rm3100_ctx[idx].rtio_ctx,
+						rm3100_ctx[idx].readings, 128);
+				if (rc != 0) {
+					LOG_ERR("%s: sensor_read() failed: %d",
+						rm3100_ctx[idx].dev->name, rc);
 					break;
-			}
+				}
 
-			const struct sensor_decoder_api *decoder;
-			uint32_t mag_fit = 0;
-
-			LOG_DBG("Getting mag 0 decoder");
-			rc = sensor_get_decoder(rm3100a_dev, &decoder);
-			if (rc != 0) {
-					LOG_ERR("%s: sensor_get_decode() failed: %d", rm3100a_dev->name, rc);
+				LOG_DBG("Getting decoder for mag '%s'", rm3100_ctx[idx].dev->name);
+				rc = sensor_get_decoder(rm3100_ctx[idx].dev,
+						&rm3100_ctx[idx].decoder);
+				if (rc != 0) {
+					LOG_ERR("Failed sensor_get_decoder() for '%s', err %d",
+						rm3100_ctx[idx].dev->name, rc);
 					break;
-			}
+				}
 
-			LOG_DBG("Decoding mag 0 into plus Z mag 1");
-			decoder->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_XYZ, 0},
-											&mag_fit, 1, &mag_data[EC_MAG_0_PZ_1]);
+				// Assure frame iterator points to start of encoded readings:
+				rm3100_ctx[idx].mag_fit = 0;
+				LOG_DBG("Decoding mag '%s' into plus Z mag 1",
+					rm3100_ctx[idx].dev->name);
+				rm3100_ctx[idx].decoder->decode(rm3100_ctx[idx].readings,
+						(struct sensor_chan_spec) {SENSOR_CHAN_MAGN_XYZ, 0},
+						&rm3100_ctx[idx].mag_fit, 1,
+						&rm3100_ctx[idx].mag_data);
+			}
 		}
-
-//------------------------------------------------------
-// For magnetometer b:
-//------------------------------------------------------
-
-#if (NUM_MAGS > 1)
-		if (mag_1_good) {
-			LOG_DBG("Reading mag 1");
-			rc = sensor_read(&iodev_b, &ctx_b, buf_b, 128);
-			if (rc != 0) {
-					LOG_ERR("%s: sensor_read() for mag1 failed, err %d", rm3100b_dev->name, rc);
-					break;
-			}
-
-			const struct sensor_decoder_api *decoder_b;
-			uint32_t mag_fit_b = 0;
-
-			LOG_DBG("Getting mag 1 decoder");
-			rc = sensor_get_decoder(rm3100b_dev, &decoder_b);
-			if (rc != 0) {
-					LOG_ERR("%s: sensor_get_decode() failed: %d", rm3100b_dev->name, rc);
-					break;
-			}
-
-			LOG_DBG("Decoding mag 1 into plus Z mag 2");
-			decoder_b->decode(buf, (struct sensor_chan_spec) {SENSOR_CHAN_MAGN_XYZ, 0},
-											&mag_fit_b, 1, &mag_data[EC_MAG_1_PZ_2]);
-		}
-#endif
 
 		k_msleep(RM3100_DEMO_SLEEP_TIME_MS);
 		loop_count++;
@@ -313,4 +465,3 @@ static void handle_mag(void *p1, void *p2, void *p3)
 }
 
 K_THREAD_DEFINE(mag_id, MAG_THREAD_STACK_SIZE, handle_mag, NULL, NULL, NULL, MAG_THREAD_PRIORITY, 0, 0);
-

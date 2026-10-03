@@ -1,8 +1,10 @@
 #ifndef _MAGNETOMETER_H_
 #define _MAGNETOMETER_H_
 
-//#define DEV_MAG_ZEPHYR_ENABLE_MAGB
-#define NUM_MAGS 2
+// Note:
+// - EC stands for End Cap, a daughter board to Oresat end cards.
+// - PZ stands for positive z-axis.
+// - MZ stands for negative z-axis.
 
 // The order below matches the order in the object dictionary.
 typedef enum {
@@ -15,5 +17,6 @@ typedef enum {
 
 int get_mag_reading(int mag_num, int32_t *x, int32_t *y, int32_t *z);
 
-#endif
+uint32_t num_mags_detected(void);
 
+#endif // _MAGNETOMETER_H_
