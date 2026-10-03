@@ -300,10 +300,6 @@ int init_mag(void)
 		return -ENODEV;
 	}
 
-#define DEV_LIMIT_MAG_EN_RETRIES
-#ifdef DEV_LIMIT_MAG_EN_RETRIES
-	uint32_t mag_enable_tries = 0;
-#endif
 	for (;;) {
 		k_msleep(500);
 		LOG_INF("Turning on mag power");
@@ -317,15 +313,6 @@ int init_mag(void)
 		} else {
 			break;
 		}
-#ifdef DEV_LIMIT_MAG_EN_RETRIES
-		mag_enable_tries++;
-
-                if (mag_enable_tries > 3) {
-                        LOG_WRN("Tried a fixed number of times to enable magnetometer, ");
-                        LOG_WRN("giving up moving on.");
-                        break;
-                }
-#endif
 	}
 
 	// We use deferred initialization in the device tree so we can wait until
@@ -429,14 +416,7 @@ static void handle_mag(void *p1, void *p2, void *p3)
 
 	rc = init_mag();
 	if (rc < 0) {
-// Tolerate one or more mag sensor init failures, to allow one sensor to
-// support tests not on Flatsat hardware:
-#define DEV_ACCEPT_MAG_INIT_FAILURES
-#ifndef DEV_ACCEPT_MAG_INIT_FAILURES
                 return;
-#else
-		LOG_INF("- DEV 0926 - continuing on for testing purpose . . .");
-#endif
 	}
 
 	LOG_INF("Starting mag loop");

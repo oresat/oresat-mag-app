@@ -667,16 +667,10 @@ static void handle_imu(void *p1, void *p2, void *p3)
 	load_gyro_calibration(&gx_cal, &gy_cal, &gz_cal);
 	LOG_INF("Gyro calibration: (%d, %d, %d)", gx_cal, gy_cal, gz_cal);
 
-#define DEV_SKIP_IMU_INIT_FOR_MAG_CODE_TEST
-#ifndef DEV_SKIP_IMU_INIT_FOR_MAG_CODE_TEST
 	err = init_imu();
 	if (err < 0) {
 		return;
 	}
-#else
-	LOG_WRN("- DEV 1003 - returning early from IMU thread to allow for mag code testing");
-	return;
-#endif
 
 	err = configure_imu();
 	if (err < 0) {
