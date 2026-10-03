@@ -300,6 +300,10 @@ int init_mag(void)
 		return -ENODEV;
 	}
 
+#define DEV_LIMIT_MAG_EN_RETRIES
+#ifdef DEV_LIMIT_MAG_EN_RETRIES
+	uint32_t mag_enable_tries = 0;
+#endif
 	for (;;) {
 		k_msleep(500);
 		LOG_INF("Turning on mag power");
@@ -313,6 +317,15 @@ int init_mag(void)
 		} else {
 			break;
 		}
+#ifdef DEV_LIMIT_MAG_EN_RETRIES
+		mag_enable_tries++;
+
+                if (mag_enable_tries > 3) {
+                        LOG_WRN("Tried a fixed number of times to enable magnetometer, ");
+                        LOG_WRN("giving up moving on.");
+                        break;
+                }
+#endif
 	}
 
 	// We use deferred initialization in the device tree so we can wait until
@@ -416,7 +429,14 @@ static void handle_mag(void *p1, void *p2, void *p3)
 
 	rc = init_mag();
 	if (rc < 0) {
-		return;
+// Tolerate one or more mag sensor init failures, to allow one sensor to
+// support tests not on Flatsat hardware:
+#define DEV_ACCEPT_MAG_INIT_FAILURES
+#ifndef DEV_ACCEPT_MAG_INIT_FAILURES
+                return;
+#else
+		LOG_INF("- DEV 0926 - continuing on for testing purpose . . .");
+#endif
 	}
 
 	LOG_INF("Starting mag loop");
@@ -426,8 +446,9 @@ static void handle_mag(void *p1, void *p2, void *p3)
 			LOG_WRN("MAX892 mag power fault!");
 		}
 
-		idx = 0;
-		for (idx = 0; idx < ARRAY_SIZE(rm3100_ctx); idx++) {
+		for (uint32_t i = 0; i < ARRAY_SIZE(rm3100_ctx); i++) {
+			// Map our local loop index to sensor physical location id:
+			idx = mag_idx_fs[i];
 			if (rm3100_ctx[idx].status_ok) {
 				LOG_DBG("Reading mag '%s'", rm3100_ctx[idx].dev->name);
 				rc = sensor_read(rm3100_ctx[idx].iodev, rm3100_ctx[idx].rtio_ctx,
@@ -447,6 +468,8 @@ static void handle_mag(void *p1, void *p2, void *p3)
 					break;
 				}
 
+				// Assure frame iterator points to start of encoded readings:
+				rm3100_ctx[idx].mag_fit = 0;
 				LOG_DBG("Decoding mag '%s' into plus Z mag 1",
 					rm3100_ctx[idx].dev->name);
 				rm3100_ctx[idx].decoder->decode(rm3100_ctx[idx].readings,
