@@ -220,7 +220,7 @@ int get_mag_reading(int mag_num, int32_t *x, int32_t *y, int32_t *z)
 	This means the decoder fn above uses shift = 11 and divider = 75 (uT per LSB).
 	Further, the decoder scales the data (micro_tesla_scaled) then divides by 100
 	to get gauss_scaled, which is the raw output value.
-	To extract the integer portion in gauss, Zephyr samples such as 
+	To extract the integer portion in gauss, Zephyr samples such as
 	zephyr/sensors/sample/stream_fifo/src/main.c use a series of macros:
 	PRIsensor_q31_data_arg() from zephyr/include/zephyr/drivers/sensor_data_types.h, which then
 	uses macros from zephyr/include/zephyr/dsp/print_format.h: PRIq_arg() etc.

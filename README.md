@@ -5,6 +5,10 @@ OreSat Zephyr app for the mag card.
 This card hosts an IMU on board, with interfaces to external
 magnetorquer coils and magnetometers.
 
+Depending on the hardware version of the card, the IMU is either a TDK
+ICM-42688 (board v1.0.0) or a Bosch Sensortec BMI-270 (board v1.1.0).
+It is important to build and flash the correct version or else the IMU will be inoperative.
+
 The magnetorquer coils connect to the card via J3, J4, and J5.
 
 The magnetometers are located on the +Z and optionally also the -Z
@@ -18,15 +22,26 @@ magnetometers with the mag card only powered by the debug connector.
 # Building and flashing
 Ensure you are in the `mag` directory (`cd src/oresat/firmware/apps/mag`) prior to building.
 
-> NOTE:
->   The `mcxn947_mag_card` is the default. It normally does not need to be specified as shown below,
->   except for the important exception of enabling MCUboot. In that case, it is mandatory for Zephyr 4.2.0.
+> **NOTE 1:**
+>   The `mcxn947_mag_card` v1.1.0 is now the default. It normally does not need to be specified.
 
-| Board         | Build Example                                         |
-| ------------- | ----------------------------------------------------- |
-| mcxn947_mag_card | `west build -p always -b mcxn947_mag_card/mcxn947/cpu0 -- -DCONFIG_MCUBOOT_ALLOWED=n` |
-| mcxn947_mag_card with shell | `west build -p always -b mcxn947_mag_card/mcxn947/cpu0 -- -DEXTRA_CONF_FILE=overlay_shell.conf -DCONFIG_MCUBOOT_ALLOWED=n` |
-| mcxn947_mag_card with MCUboot | `west build -p always -b mcxn947_mag_card/mcxn947/cpu0 --sysbuild -- -DBOARD_ROOT=$PWD` |
+> **NOTE 2:**
+>   If you are building for obsolete mag card hardware v1.0.0, you must specify it using the Zephyr board revision syntax:
+>   [Zephyr Board Revision Syntax] for every combination of features.
+
+> **NOTE 3:**
+>   You no longer need to specify the board revision nor the location of BOARD_ROOT when building with
+>   MCUBOOT support (sysbuild). This is now done for you in the local file `sysbuild/CMakeLists.txt`.
+
+| Board And Features | Build Command                                         |
+| ------------------ | ----------------------------------------------------- |
+| mcxn947_mag_card v1.1.0 | `west build -p always -- -DCONFIG_MCUBOOT_ALLOWED=n` |
+| mcxn947_mag_card v1.1.0 with shell | `west build -p always -- -DEXTRA_CONF_FILE=overlay_shell.conf -DCONFIG_MCUBOOT_ALLOWED=n` |
+| mcxn947_mag_card v1.1.0 with MCUboot | `west build -p always --sysbuild` |
+| |
+| mcxn947_mag_card v1.0.0 | `west build -p always -b mcxn947_mag_card@1.0.0/mcxn947/cpu0 -- -DCONFIG_MCUBOOT_ALLOWED=n` |
+| mcxn947_mag_card v1.0.0 with shell | `west build -p always -b mcxn947_mag_card@1.0.0/mcxn947/cpu0 -- -DEXTRA_CONF_FILE=overlay_shell.conf -DCONFIG_MCUBOOT_ALLOWED=n` |
+| mcxn947_mag_card v1.0.0 with MCUboot | `west build -p always -b mcxn947_mag_card@1.0.0/mcxn947/cpu0 --sysbuild` |
 
 > NOTE: the section below only gives general instructions. Specific steps below (like for setting the CAN node id) are self-contained
 >   in the section.
@@ -40,7 +55,7 @@ CAN.
 
 For the first build, or when previously running with the bootloader:
 ```
-$ west build -p
+$ west build -p <remainder of desired build from table above...>
 $ west flash --erase
 ```
 
@@ -77,7 +92,7 @@ This requires three steps in practice:
 ## Enabling the shell
 Do a build with the `overlay_shell.conf` file as a parameter to `west build`:
 ```
-$ west build -- -DEXTRA_CONF_FILE=overlay_shell.conf
+$ west build -- -DEXTRA_CONF_FILE=overlay_shell.conf -DCONFIG_MCUBOOT_ALLOWED=n
 ```
 Flash as explained earlier.
 
@@ -148,7 +163,7 @@ Build again, using whatever options you need as explained in the document.
 
 # Building and flashing with bootloader
 ```
-$ west build -p -b mcxn947_mag_card/mcxn947/cpu0 --sysbuild -- -DBOARD_ROOT=$PWD
+$ west build -p --sysbuild
 $ west flash --erase
 ```
 This will build two binaries: one for the bootloader, and one for the application.
@@ -193,3 +208,6 @@ $ python3 flash_canopen.py --serial-port /dev/ttyACM1 --bin  build/mag/zephyr/ze
 
 > NOTE: The CAN id must be changed to the proper one for this card before the
 >  C3 can access it.
+
+[Zephyr Board Revision Syntax]:https://docs.zephyrproject.org/4.4.1/develop/application/index.html#building-for-a-board-revision
+

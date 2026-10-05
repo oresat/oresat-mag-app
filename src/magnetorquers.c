@@ -25,6 +25,7 @@
 #include "gpios.h"
 #include "magnetometer.h"
 #include "windowed_average.h"
+#include "heap_stats.h"
 #include "magnetorquers.h"
 
 LOG_MODULE_REGISTER(magnetorquers, CONFIG_MAG_TQ_LOG_LEVEL);
@@ -37,11 +38,11 @@ LOG_MODULE_REGISTER(magnetorquers, CONFIG_MAG_TQ_LOG_LEVEL);
 
 #define HIST_LEN 10								// number of current reading samples to use for running average
 
-#define MAGNETORQUER_STARTUP_DELAY 2000			// roughly when all the helper threads are up; TODO: add interthread signalling for this
-#define ITERATION_PERIOD 5						// ms
-#define DEBUG_PRINT_PERIOD 1500					// ms
-#define MAGNETORQUER_UPDATE_PERIOD 100  		// ms
-#define MT_LOOP_PRINT_PERIOD 100
+#define MAGNETORQUER_STARTUP_DELAY_MS 2000		// roughly when all the helper threads are up; TODO: add interthread signalling for this
+#define ITERATION_PERIOD_MS 5					// ms
+#define DEBUG_PRINT_PERIOD_MS 1500				// ms
+#define MAGNETORQUER_UPDATE_PERIOD_MS 100		// ms
+#define MT_LOOP_PRINT_PERIOD_MS 100
 #define ISENSE_GAIN 50.0f						// gain of the INA185 op amp
 #define ISENSE_R_OHMS 0.030f					// resistance between the op amp + and - inputs
 #define VSENSE_INPUT_OFFSET_TYP_UV 5			// typically, the INA185 can have +/- this many microvolts offset on the input (pre-gain)
@@ -193,7 +194,9 @@ static void handle_can_open_data(void)
 
 	CO_LOCK_OD();
 
-	strncpy(CO_OD_RAM.versions.fw_version, &APP_VERSION_STRING[6], ver_size);
+	// The CAN stack does not need arrays of characters to be NULL terminated, so use memcpy
+	// instead of strncpy or strcat.
+	memcpy(CO_OD_RAM.versions.fw_version, &APP_VERSION_STRING[6], ver_size);
 
 	for (int i = 0; i < 3; i++) {
 		if (g_adcs_data.mt_pwm_data[i].target_current_uA != *setpoints[i]) {
@@ -284,7 +287,7 @@ static void print_debug_output(void) {
 	static int64_t last_print_time = 0;
 	int64_t now = k_uptime_get();
 
-	if ((now - last_print_time) > DEBUG_PRINT_PERIOD) {
+	if ((now - last_print_time) > DEBUG_PRINT_PERIOD_MS) {
 		last_print_time = now;
 
 		LOG_INF("Magnetorquer iterations: %u", iterations);
@@ -346,8 +349,6 @@ static void print_debug_output(void) {
 		// LOG_DBG( "  CO_EM_GENERIC_ERROR:  %u", CO_isError(CO->em, CO_EM_GENERIC_ERROR));
 
 #if defined(CONFIG_SYS_HEAP_RUNTIME_STATS)
-		extern void print_heap_stats(void);
-
 		print_heap_stats();
 #endif
 	}
@@ -545,6 +546,7 @@ static int get_current_readings(mt_pwm_phase_data_t *axes)
 	}
 
 	// now read the values acquired; we only have 3 axes, but sometimes there is a 4th ADC for Vbusp measurements
+	// TODO: add handling of 4th ADC (if present) -- compensate using actual Vbusp going to the magnetorquer coils
 	for (i = 0; i < MIN(get_num_adc_channels(), 3); i++) {
 		err = read_adc(i, &adc_mv);
 		if (err) {
@@ -648,11 +650,6 @@ static int reset_magnetorquer(void)
 {
 	int err;
 
-//	err = gpio_pin_configure_dt(&mt_en, GPIO_OUTPUT_INACTIVE); // drive the pin low -- disable power stage
-//	if (err) {
-//		LOG_ERR("Error configuring mt_en output low: %d", err);
-//		return err;
-//	}
 	err = gpio_pin_set_dt(&mt_en, false);
 	if (err) {
 		LOG_ERR("Error setting mt_en low: %d", err);
@@ -677,14 +674,6 @@ static int reset_magnetorquer(void)
 		return err;
 	}
 	k_sleep(K_MSEC(5));
-#if 0
-	err = gpio_pin_configure_dt(&mt_en, GPIO_INPUT); // float the pin; enable power stage
-	if (err) {
-		LOG_ERR("Error floating mt_en: %d", err);
-		return err;
-	}
-	k_sleep(K_MSEC(5));
-#endif
 	return err;
 }
 
@@ -700,7 +689,13 @@ static int init_magnetorquer(void) {
 
 	err = init_gpios();
 	if (err) {
-		LOG_ERR("Error initializing GPIOS: %d", err);
+		LOG_ERR("Error initializing general GPIOs: %d", err);
+		return err;
+	}
+
+	err = init_mt_gpios();
+	if (err) {
+		LOG_ERR("Error initializing magnetorquer GPIOs: %d", err);
 		return err;
 	}
 
@@ -729,11 +724,6 @@ static int init_magnetorquer(void) {
 		return err;
 	}
 
-//	err = gpio_pin_configure_dt(&mt_en, GPIO_OUTPUT_INACTIVE); // drive the pin low
-//	if (err) {
-//		LOG_ERR("Error configuring mt_en output low: %d", err);
-//		return err;
-//	}
 	err = gpio_pin_set_dt(&mt_en, false);
 	if (err) {
 		LOG_ERR("Error setting mt_en low: %d", err);
@@ -788,7 +778,7 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 	int err;
 
 	k_thread_name_set(magtqr_id, "magtqr_thread");
-	k_sleep(K_MSEC(MAGNETORQUER_STARTUP_DELAY));
+	k_sleep(K_MSEC(MAGNETORQUER_STARTUP_DELAY_MS));
 
 	LOG_INF("Starting MAGNETORQUER thread");
 
@@ -834,7 +824,7 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 		}
 
 		if (check_magnetorquer_fault()) {
-			// do something on a fault?
+			// TODO: discuss if we should do something on a magnetorquer hardware fault.
 		}
 
 		print_debug_output();
@@ -842,7 +832,7 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 		handle_can_open_data();
 
 		t_now = k_uptime_get();
-		int32_t t_sleep = (int32_t)(ITERATION_PERIOD - (t_now - t_last));
+		int32_t t_sleep = (int32_t)(ITERATION_PERIOD_MS - (t_now - t_last));
 
 		if (t_sleep <= 0) {
 			t_sleep = 1;
@@ -909,6 +899,12 @@ static void reset_ramp_mode(void)
 
 static int handle_magnetorquer(void *p1, void *p2, void *p3)
 {
+	// We don't need these functions in shell mode.
+	(void)get_gyro_readings;
+	(void)get_accel_readings;
+	(void)get_mag_readings;
+	(void)print_debug_output;
+
 	int err;
 	uint32_t adc_val;
 	int64_t t_start = k_uptime_get(); // in milliseconds
@@ -984,7 +980,7 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 				mt_ramp_info.stop_ua = max_i_ua[mt_ramp_info.axis]; // adjust the upper bounds per axis
 				LOG_INF("x pwm, x targ mA, x fb mA,  x integ, x err, y pwm, y targ mA, y fb mA, y integ, y err, z pwm, z targ mA, z fb mA, z integ, z err");
 			}
-			if ((t_now - t_mt_print) > MT_LOOP_PRINT_PERIOD) {
+			if ((t_now - t_mt_print) > MT_LOOP_PRINT_PERIOD_MS) {
 				t_mt_print = t_now;
 				print_loop = true;
 			} else {
@@ -1025,7 +1021,7 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 		handle_can_open_data();
 
 		t_now = k_uptime_get();
-		int32_t t_sleep = (int32_t)(ITERATION_PERIOD - (t_now - t_last));
+		int32_t t_sleep = (int32_t)(ITERATION_PERIOD_MS - (t_now - t_last));
 
 		if (t_sleep <= 0) {
 			t_sleep = 1;

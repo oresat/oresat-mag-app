@@ -53,12 +53,12 @@ LOG_MODULE_REGISTER(imu_bmi, CONFIG_MAG_IMU_LOG_LEVEL);
 #define MAX_I2C_RECOVERY_RETRIES 10
 #define MAX_RECOVERY_BOOTS 10
 
-#define IMU_STARTUP_DELAY 500
-#define IMU_ITERATION_PERIOD 90 // ms -- a bit more fast than the ODR -- will wait for interrupt (polled)
+#define IMU_STARTUP_DELAY_MS 500
+#define IMU_ITERATION_PERIOD_MS 90 // ms -- a bit more fast than the ODR -- will wait for interrupt (polled)
 #define IMU_ACCEL_RANGE_G 2
 #define IMU_GYRO_RANGE_DPS 125
-#define IMU_ODR 100 // Hz
-#define DEBUG_PRINT_PERIOD  500 // 1s
+#define IMU_ODR_HZ 100 // Hz
+#define DEBUG_PRINT_PERIOD_MS  500 // 1s
 
 #define RAW_ACCEL_OUT_SCALE 1
 #define ACCEL_UNIT_SCALE 1000.0f // milli-gs
@@ -128,9 +128,6 @@ static uint8_t load_recovery_count(void)
 	if (rc < 0) {
 		LOG_ERR("Error loading recovery_count from settings: %d", rc);
 	}
-	if (!recovery_count) {
-		recovery_count = 0;
-	}
 	return recovery_count;
 }
 
@@ -192,18 +189,21 @@ static int store_accel_calibration(int32_t *acal)
 
 	rc = settings_save_one("ax_cal", (void *)&acal[0], sizeof(*acal));
 	if (rc < 0) {
-		LOG_WRN("Error saving ax_cal from settings: %d", rc);
+		LOG_ERR("Error saving ax_cal from settings: %d", rc);
+		return rc;
 	}
 	rc = settings_save_one("ay_cal", (void *)&acal[1], sizeof(*acal));
 	if (rc < 0) {
-		LOG_WRN("Error saving ay_cal from settings: %d", rc);
+		LOG_ERR("Error saving ay_cal from settings: %d", rc);
+		return rc;
 	}
 	rc = settings_save_one("az_cal", (void *)&acal[2], sizeof(*acal));
 	if (rc < 0) {
-		LOG_WRN("Error saving az_cal from settings: %d", rc);
+		LOG_ERR("Error saving az_cal from settings: %d", rc);
+		return rc;
 	}
 
-	return rc;
+	return 0;
 }
 
 static int store_gyro_calibration(int32_t *gcal)
@@ -212,18 +212,21 @@ static int store_gyro_calibration(int32_t *gcal)
 
 	rc = settings_save_one("gx_cal", (void *)&gcal[0], sizeof(*gcal));
 	if (rc < 0) {
-		LOG_WRN("Error saving gx_cal from settings: %d", rc);
+		LOG_ERR("Error saving gx_cal to settings: %d", rc);
+		return rc;
 	}
 	rc = settings_save_one("gy_cal", (void *)&gcal[1], sizeof(*gcal));
 	if (rc < 0) {
-		LOG_WRN("Error saving gy_cal from settings: %d", rc);
+		LOG_ERR("Error saving gy_cal to settings: %d", rc);
+		return rc;
 	}
 	rc = settings_save_one("gz_cal", (void *)&gcal[2], sizeof(*gcal));
 	if (rc < 0) {
-		LOG_WRN("Error saving gz_cal from settings: %d", rc);
+		LOG_ERR("Error saving gz_cal to settings: %d", rc);
+		return rc;
 	}
 
-	return rc;
+	return 0;
 }
 #endif
 
@@ -233,11 +236,6 @@ static int recover_i2c_bus(void)
 	int attempt;
 	int rec_count = 0;
 
-	ret = settings_subsys_init();
-	if (ret) {
-		LOG_ERR("settings subsys initialization: fail (err %d)", ret);
-	}
-
 	rec_count = load_recovery_count();
 	LOG_INF("  I2C recovery count: %d", rec_count);
 	if (rec_count >= MAX_RECOVERY_BOOTS) {
@@ -245,7 +243,7 @@ static int recover_i2c_bus(void)
 	}
 
 	// We use deferred-init in the device tree, which means we need to manually start the driver
-	ret = device_init(dev);
+	ret = device_init(dev); // NOTE: the BMI270 driver performs a chip soft-reset during init.
 	if (ret) {
 		LOG_WRN("Device not started: %d", ret);
 	}
@@ -300,11 +298,6 @@ static int recover_i2c_bus(void)
 	return ret;
 }
 
-static int reset_imu(void)
-{
-	return 0;
-}
-
 static int init_imu(void)
 {
 	int ret;
@@ -344,11 +337,10 @@ static int init_imu(void)
 		LOG_ERR("IMU %s is not ready", dev->name);
 		return -ENODEV;
 	}
-
 	LOG_INF("IMU detected.");
 
 	imu_is_ready = true;
-	return reset_imu();
+	return 0;
 }
 
 /**
@@ -414,7 +406,6 @@ static int configure_imu(void)
 
 	LOG_INF("Configuring IMU...");
 
-#if 1
 	struct sensor_value full_scale;
 	struct sensor_value sampling_freq;
 	struct sensor_value oversampling;
@@ -424,7 +415,7 @@ static int configure_imu(void)
 	 */
 	full_scale.val1 = IMU_ACCEL_RANGE_G;	/* G */
 	full_scale.val2 = 0;
-	sampling_freq.val1 = IMU_ODR;			/* Hz. Performance mode */
+	sampling_freq.val1 = IMU_ODR_HZ;			/* Hz. Performance mode */
 	sampling_freq.val2 = 0;
 	oversampling.val1 = 1;					/* Normal mode */
 	oversampling.val2 = 0;
@@ -444,7 +435,7 @@ static int configure_imu(void)
 	/* Setting scale in degrees/s to match the sensor scale */
 	full_scale.val1 = IMU_GYRO_RANGE_DPS;	/* dps */
 	full_scale.val2 = 0;
-	sampling_freq.val1 = IMU_ODR;			/* Hz. Performance mode */
+	sampling_freq.val1 = IMU_ODR_HZ;			/* Hz. Performance mode */
 	sampling_freq.val2 = 0;
 	oversampling.val1 = 1;					/* Normal mode */
 	oversampling.val2 = 0;
@@ -461,93 +452,6 @@ static int configure_imu(void)
 			SENSOR_ATTR_SAMPLING_FREQUENCY,
 			&sampling_freq);
 
-#else
-
-	// keeping the specs from Andrew for the ICM here as a reference
-	// TODO: compare what's available in the BMI that we can configure
-	// in similar manner
-
-	/* Enable gyro in low noise mode */
-	ret = imu_write_reg(REG_PWR_MGMT0, (BIT_GYRO_MODE_LNM << 2));
-	k_msleep(1); /* must sleep > 200 us before any other register access */
-	if (ret < 0) {
-		LOG_ERR("Error setting Power Mgmt on IMU: %d", ret);
-		return ret;
-	}
-
-	/* Set gyro full scale range and output data rate */
-	ret = imu_write_reg(REG_GYRO_CONFIG0,
-						(GYRO_FULL_SCALE_RANGE_BIT << 5) | BIT_GYRO_ODR_100);
-	k_msleep(1); /* must sleep > 200 us before any other register access */
-	if (ret < 0) {
-		LOG_ERR("Error setting Gyro Config on IMU: %d", ret);
-		return ret;
-	}
-
-	/* Set gyro bandwidth notch filter to 10Hz */
-	/* This is a bank1 register */
-	ret = imu_write_reg(REG_GYRO_CONFIG_STATIC10,
-						7 << 4); // GYRO_NF_BW_SEL = 10Hz
-	if (ret < 0) {
-		LOG_ERR("Error setting gyro bandwitch notch filter: %d", ret);
-		return ret;
-	}
-
-	/* Set gyro notch filter nf_coswz_sel = 1, nf_coswz = 39
-	   for each axis X, Y, Z; nf_coswz is split across two regs; bits 0-7
-	   in one and bit 8 in another */
-	uint8_t nf_coswz = 39;
-	uint8_t nf_coswz_bits07 = nf_coswz & 0xff;
-	uint8_t nf_coswz_bit8 = (nf_coswz >> 8) & 1;
-	uint8_t nf_coswz_sel = 1;
-	uint8_t val = (nf_coswz_sel << 5) | (nf_coswz_sel << 4) |
-		(nf_coswz_sel << 3) | (nf_coswz_bit8 << 2) |
-		(nf_coswz_bit8 << 1) | (nf_coswz_bit8 << 0);
-
-	LOG_DBG("nf_coswz:%u, sel:%u, bits07:0x%02x, bit8:0x%02x, val:0x%02x",
-			nf_coswz, nf_coswz_sel, nf_coswz_bits07, nf_coswz_bit8, val);
-	ret = imu_write_reg(REG_GYRO_CONFIG_STATIC6, nf_coswz_bits07);
-	if (ret < 0) {
-		LOG_ERR("Error setting x axis coswz bits07: %d", ret);
-		return ret;
-	}
-	ret = imu_write_reg(REG_GYRO_CONFIG_STATIC7, nf_coswz_bits07);
-	if (ret < 0) {
-		LOG_ERR("Error setting y axis coswz bits07: %d", ret);
-		return ret;
-	}
-	ret = imu_write_reg(REG_GYRO_CONFIG_STATIC8, nf_coswz_bits07);
-	if (ret < 0) {
-		LOG_ERR("Error setting z axis coswz bits07: %d", ret);
-		return ret;
-	}
-	ret = imu_write_reg(REG_GYRO_CONFIG_STATIC8, val);
-	if (ret < 0) {
-		LOG_ERR("Error setting axes x,y,z coswz_sel and bit8: %d", ret);
-		return ret;
-	}
-
-	/** Set anti-alias filter
-	 * 3dB Bandwidth of anti-aliasing filter (AAF) should be as low
-	 * as possible; 42 Hz GYRO_AAF_DELT = 1, GYRO_AAF_DELTSQR = 1,
-	 * GYRO_AAF_BITSHIFT = 15.
-	 */
-	ret = imu_write_reg(REG_GYRO_CONFIG_STATIC3, 1);
-	if (ret < 0) {
-		LOG_ERR("Error setting gyro aaf: %d", ret);
-		return ret;
-	}
-	ret = imu_write_reg(REG_GYRO_CONFIG_STATIC4, 1);
-	if (ret < 0) {
-		LOG_ERR("Error setting gyro aaf: %d", ret);
-		return ret;
-	}
-	ret = imu_write_reg(REG_GYRO_CONFIG_STATIC5, 15 << 4);
-	if (ret < 0) {
-		LOG_ERR("Error setting gyro aaf: %d", ret);
-		return ret;
-	}
-#endif
 	LOG_INF("Configuration complete.");
 	return ret;
 }
@@ -576,7 +480,6 @@ static int32_t channel_accel_convert(struct sensor_value *val_mps2,
 	//    out_val = (out_val * SENSOR_G * (int64_t) range) / INT16_MAX;
 	// The value of gravitational constant in micro m/s^2:
 	//    SENSOR_G 9806650
-	// 16 473 798   16 459 699
 
 	out_val = (int32_t)((out_val * ACCEL_UNIT_SCALE) / (SENSOR_G * RAW_ACCEL_OUT_SCALE));
 
@@ -720,22 +623,20 @@ void get_gyro_raw_data(int16_t *x, int16_t *y, int16_t *z)
 static void handle_imu(void *p1, void *p2, void *p3)
 {
 	int err;
-	int rec_count;
 
 	k_thread_name_set(imu_id, "imu_thread");
-	k_msleep(IMU_STARTUP_DELAY);
+	k_msleep(IMU_STARTUP_DELAY_MS);
 
 	LOG_INF("Starting IMU thread");
+
+	err = settings_subsys_init();
+	if (err) {
+		LOG_ERR("settings subsys initialization: fail (err %d)", err);
+	}
 
 	err = recover_i2c_bus();
 	if (err) {
 		LOG_ERR("Unable to recover bus. Continuing, but expect issues.");
-	}
-
-	rec_count = load_recovery_count();
-	LOG_INF("  I2C recovery count: %d", rec_count);
-	if (rec_count >= MAX_RECOVERY_BOOTS) {
-		LOG_ERR("Unable to recover i2c bus after 10 resets. Will stop trying.");
 	}
 
 	load_accel_calibration(a_cal);
@@ -746,18 +647,22 @@ static void handle_imu(void *p1, void *p2, void *p3)
 
 	err = init_imu();
 	if (err < 0) {
+		k_msleep(1000);
+		__ASSERT(false, "Fatal error");
 		return;
 	}
 
 	err = configure_imu();
 	if (err < 0) {
+		k_msleep(1000);
+		__ASSERT(false, "Fatal error");
 		return;
 	}
 
 	int count = 0;
 	int samples = 0;
 	int32_t temp = 0;
-	k_msleep(IMU_STARTUP_DELAY);
+	k_msleep(IMU_STARTUP_DELAY_MS);
 
 	LOG_INF("Starting imu loop");
 
@@ -791,14 +696,14 @@ static void handle_imu(void *p1, void *p2, void *p3)
 			}
 		}
 
-		// Temperature in Degrees Centigrade = (TEMP_DATA / 132.48) + 25
-		int32_t temp_decicentigrade = (int32_t)(((int)temp * 100) / (1325) + 250);
+		// Temperature in tenths of degrees Centigrade = (TEMP_DATA / 132.48) + 25
+		int32_t temp_deci_centigrade = (int32_t)(((int)temp * 100) / (1325) + 250);
 
-		gtemp = temp_decicentigrade / 10;
+		gtemp = temp_deci_centigrade / 10;
 
 		if (!err) {
 			count++;
-			if (count >= (DEBUG_PRINT_PERIOD / IMU_ODR) ){
+			if (count >= (DEBUG_PRINT_PERIOD_MS / IMU_ODR_HZ) ){
 				count = 0;
 				LOG_DBG("Accl %d, %d, %d; sensor: %d, %d, %d",
 						a_mgs[0], a_mgs[1], a_mgs[2],
@@ -806,10 +711,10 @@ static void handle_imu(void *p1, void *p2, void *p3)
 				LOG_DBG("Gyro %d, %d, %d; sensor: %d, %d, %d",
 						g_mdps[0], g_mdps[1], g_mdps[2],
 						g_sns[0], g_sns[1], g_sns[2]);
-				LOG_DBG("Temp %d", temp_decicentigrade);
+				LOG_DBG("Temp %d", temp_deci_centigrade);
 			}
 		}
-		k_msleep(IMU_ITERATION_PERIOD);
+		k_msleep(IMU_ITERATION_PERIOD_MS);
 	}
 }
 

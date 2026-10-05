@@ -6,7 +6,7 @@
  */
 #include <stdio.h>
 #include <zephyr/kernel.h>
-#include <zephyr/sys/printk.h> 
+#include <zephyr/sys/printk.h>
 #include <zephyr/sys/__assert.h>
 
 #include <zephyr/device.h>
@@ -28,24 +28,24 @@ LOG_MODULE_REGISTER(oresat_dac, CONFIG_MAG_DAC_LOG_LEVEL);
 	DT_NODE_HAS_PROP(ZEPHYR_USER_NODE, dac_resolution))
 #define DAC_NODE DT_PHANDLE(ZEPHYR_USER_NODE, dac0)
 #define DAC_CHANNEL_ID DT_PROP(ZEPHYR_USER_NODE, dac_channel_id)
-#define DAC_RESOLUTION DT_PROP(ZEPHYR_USER_NODE, dac_resolution)
+#define DAC_RESOLUTION_BITS DT_PROP(ZEPHYR_USER_NODE, dac_resolution)
 #else
 #error "Unsupported board: see README and check /zephyr,user node"
 #define DAC_NODE DT_INVALID_NODE
 #define DAC_CHANNEL_ID 0
-#define DAC_RESOLUTION 0
+#define DAC_RESOLUTION_BITS 0
 #endif
 
 static const struct device *const dac_dev = DEVICE_DT_GET(DAC_NODE);
 
-static uint16_t max_dac_value = BIT(DAC_RESOLUTION) - 1;
+static uint16_t max_dac_value = BIT(DAC_RESOLUTION_BITS) - 1;
 
 int init_dac(void)
 {
 	int ret;
 	const struct dac_channel_cfg dac_ch_cfg = {
 		.channel_id  = DAC_CHANNEL_ID,
-		.resolution  = DAC_RESOLUTION,
+		.resolution  = DAC_RESOLUTION_BITS,
 	#if defined(CONFIG_DAC_BUFFER_NOT_SUPPORT)
 		.buffered = false,
 	#else
@@ -53,7 +53,7 @@ int init_dac(void)
 	#endif /* CONFIG_DAC_BUFFER_NOT_SUPPORT */
 	};
 
-	LOG_INF("Initializing DAC for %u bit operation. Max value %u", DAC_RESOLUTION, max_dac_value);
+	LOG_INF("Initializing DAC for %u bit operation. Max value %u", DAC_RESOLUTION_BITS, max_dac_value);
 
 	/* Can we use the DAC? */
 	if (!device_is_ready(dac_dev)) {
@@ -74,7 +74,7 @@ int write_dac(uint16_t value)
 {
 	int ret;
 	/* Number of valid DAC values, e.g. 4096 for 12-bit DAC */
-	//const int dac_values = 1U << DAC_RESOLUTION;
+	//const int dac_values = 1U << DAC_RESOLUTION_BITS;
 
 	ret = dac_write_value(dac_dev, DAC_CHANNEL_ID, value);
 	if (ret != 0) {

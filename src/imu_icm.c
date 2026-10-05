@@ -6,8 +6,6 @@
 #include <zephyr/sys/util.h>
 #include <zephyr/settings/settings.h>
 #include <zephyr/shell/shell.h>
-//#include <canopennode.h>
-//#include <CO_OD.h>
 
 #include "windowed_average.h"
 #include "imu.h"
@@ -60,10 +58,10 @@ LOG_MODULE_REGISTER(imu_icm, CONFIG_MAG_IMU_LOG_LEVEL);
 #define MAX_I2C_RECOVERY_RETRIES 10
 #define MAX_RECOVERY_BOOTS 10
 
-#define IMU_STARTUP_DELAY 500
-#define IMU_ITERATION_PERIOD 90 // ms -- a bit more fast than the ODR -- will wait for interrupt (polled)
-#define IMU_ODR 100 // Hz
-#define DEBUG_PRINT_PERIOD  500 // 1s
+#define IMU_STARTUP_DELAY_MS 500
+#define IMU_ITERATION_PERIOD_MS 90 // ms -- a bit more fast than the ODR -- will wait for interrupt (polled)
+#define IMU_ODR_HZ 100 // Hz
+#define DEBUG_PRINT_PERIOD_MS  500 // 1s
 
 // 15.625 degrees / second full scale range
 #define GYRO_FULL_SCALE_RANGE_BIT BIT_GYRO_UI_FS_15_625
@@ -193,9 +191,6 @@ static uint8_t load_recovery_count(void)
 	if (rc < 0) {
 		LOG_ERR("Error loading recovery_count from settings: %d", rc);
 	}
-	if (!recovery_count) {
-		recovery_count = 0;
-	}
 	return recovery_count;
 }
 
@@ -234,18 +229,21 @@ static int store_gyro_calibration(int16_t *gxcal, int16_t *gycal, int16_t *gzcal
 
 	rc = settings_save_one("gx_cal", (void *)gxcal, sizeof(*gxcal));
 	if (rc < 0) {
-		LOG_WRN("Error saving gx_cal from settings: %d", rc);
+		LOG_ERR("Error saving gx_cal to settings: %d", rc);
+		return rc;
 	}
 	rc = settings_save_one("gy_cal", (void *)gycal, sizeof(*gycal));
 	if (rc < 0) {
-		LOG_WRN("Error saving gy_cal from settings: %d", rc);
+		LOG_ERR("Error saving gy_cal to settings: %d", rc);
+		return rc;
 	}
 	rc = settings_save_one("gz_cal", (void *)gzcal, sizeof(*gzcal));
 	if (rc < 0) {
-		LOG_WRN("Error saving gz_cal from settings: %d", rc);
+		LOG_ERR("Error saving gz_cal to settings: %d", rc);
+		return rc;
 	}
 
-	return rc;
+	return 0;
 }
 #endif
 
@@ -526,17 +524,17 @@ static int configure_imu(void)
 	 */
 	ret = imu_write_reg(REG_GYRO_CONFIG_STATIC3, 1);
 	if (ret < 0) {
-		LOG_ERR("Error setting gyro aaf: %d", ret);
+		LOG_ERR("Error setting gyro aaf static 3: %d", ret);
 		return ret;
 	}
 	ret = imu_write_reg(REG_GYRO_CONFIG_STATIC4, 1);
 	if (ret < 0) {
-		LOG_ERR("Error setting gyro aaf: %d", ret);
+		LOG_ERR("Error setting gyro aaf static 4: %d", ret);
 		return ret;
 	}
 	ret = imu_write_reg(REG_GYRO_CONFIG_STATIC5, 15 << 4);
 	if (ret < 0) {
-		LOG_ERR("Error setting gyro aaf: %d", ret);
+		LOG_ERR("Error setting gyro aaf static 5: %d", ret);
 		return ret;
 	}
 	LOG_INF("Configuration complete.");
@@ -682,7 +680,7 @@ static void handle_imu(void *p1, void *p2, void *p3)
 	int rec_count;
 
 	k_thread_name_set(imu_id, "imu_thread");
-	k_msleep(IMU_STARTUP_DELAY);
+	k_msleep(IMU_STARTUP_DELAY_MS);
 
 	LOG_INF("Starting IMU thread");
 
@@ -702,11 +700,15 @@ static void handle_imu(void *p1, void *p2, void *p3)
 
 	err = init_imu();
 	if (err < 0) {
+		k_msleep(1000);
+		__ASSERT(false, "Fatal error");
 		return;
 	}
 
 	err = configure_imu();
 	if (err < 0) {
+		k_msleep(1000);
+		__ASSERT(false, "Fatal error");
 		return;
 	}
 
@@ -747,20 +749,20 @@ static void handle_imu(void *p1, void *p2, void *p3)
 			}
 		}
 
-		// Temperature in Degrees Centigrade = (TEMP_DATA / 132.48) + 25
-		int16_t temp_decicentigrade = (int16_t)(((int)temp * 100) / (1325) + 250);
+		// Temperature in tenths of degrees Centigrade = (TEMP_DATA / 132.48) + 25
+		int16_t temp_deci_centigrade = (int16_t)(((int)temp * 100) / (1325) + 250);
 
-		gtemp = temp_decicentigrade / 10;
+		gtemp = temp_deci_centigrade / 10;
 
 		if (!err) {
 			count++;
-			if (count >= (DEBUG_PRINT_PERIOD / IMU_ODR) ){
+			if (count >= (DEBUG_PRINT_PERIOD_MS / IMU_ODR_HZ) ){
 				count = 0;
 				LOG_DBG("Ave gyro: (%d, %d, %d)", gx_raw, gy_raw, gz_raw);
-				LOG_DBG("Ave temp (dC): %d", temp_decicentigrade);
+				LOG_DBG("Ave temp (dC): %d", temp_deci_centigrade);
 			}
 		}
-		k_msleep(IMU_ITERATION_PERIOD);
+		k_msleep(IMU_ITERATION_PERIOD_MS);
 	}
 }
 
@@ -805,4 +807,3 @@ SHELL_CMD_ARG_REGISTER(gyrocal, NULL,  SHELL_HELP("Calibrate the gyroscope with 
 #endif
 
 K_THREAD_DEFINE(imu_id, IMU_THREAD_STACK_SIZE, handle_imu, NULL, NULL, NULL, IMU_THREAD_PRIORITY, 0, 0);
-

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 cmake_minimum_required(VERSION 3.20.0)
 
-list(APPEND BOARD_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
-set(BOARD "mcxn947_mag_card/mcxn947/cpu0")
+list(APPEND BOARD_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/)
+set(BOARD "mcxn947_mag_card@1.1.0/mcxn947/cpu0")
 
 set(VERSION_MAJOR "1")
 set(VERSION_MINOR "1")

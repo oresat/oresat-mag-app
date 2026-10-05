@@ -23,29 +23,11 @@ LOG_MODULE_REGISTER(can_thread, CONFIG_MAG_CAN_LOG_LEVEL);
 
 #define CAN_THREAD_STACK_SIZE 2048
 #define CAN_THREAD_PRIORITY 0
-#define CAN_STARTUP_DELAY 250
+#define CAN_STARTUP_DELAY_MS 250
 
 #define MAX_FAULT_PRINTS 10
 
 extern const k_tid_t can_id;
-
-#if 0
-
-// FROM CHIBIOS CODE:
-
-void CO_errorReportRateLimited(CO_EM_t *em, const uint8_t errorBit, uint16_t errorCode, uint32_t infoCode, systime_t *last_error_time) {
-
-	const systime_t now_time = chVTGetSystemTime();
-	if( chTimeDiffX(*last_error_time, now_time) < 10000 ) {
-		return;
-	}
-	*last_error_time = now_time;
-
-	CO_errorReport(em, errorBit, errorCode, infoCode);
-}
-
-
-#endif
 
 static bool run_self_tests(void)
 {
@@ -69,15 +51,30 @@ static void handle_can(void *p1, void *p2, void *p3)
 	int print_fault = 0;
 
 	k_thread_name_set(can_id, "can_thread");
-	k_sleep(K_MSEC(CAN_STARTUP_DELAY));
+	k_sleep(K_MSEC(CAN_STARTUP_DELAY_MS));
 
 	LOG_INF("Starting CAN thread");
 
-	init_gpios();
+	err = init_gpios();
+	if (err) {
+		// We will not know what hardware we are running on for certain.
+		// But for CAN, that just means we will assume we cannot query the CAN hardware fault line,
+		// nor can we control CAN silence.
+		LOG_WRN("Could not initialize general GPIOs: %d", err);
+	}
+
+	err = init_can_gpios();
+	if (err) {
+		// Not a fatal error -- GPIOs are optional (hardware fault reporting and sleep control)
+		LOG_WRN("Error initializing CAN GPIOs: %d", err);
+	}
 
 	err = settings_subsys_init();
 	if (err) {
+		// We should not continue because we will not be able to use the proper CAN node id,
+		// nor, if the shell is enabled, will we be able to store a selected id.
 		LOG_ERR("settings subsys initialization: fail (err %d)", err);
+		goto fatal_error;
 	} else {
 		node_id = load_node_id();
 		if (node_id == DEFAULT_NODE_ID) {
@@ -89,8 +86,7 @@ static void handle_can(void *p1, void *p2, void *p3)
 #endif
 			if (IS_ENABLED(CONFIG_CAN_ID_MUST_BE_SET)) {
 				LOG_ERR("Halting.");
-				k_msleep(1000);
-				__ASSERT(false, "Fatal error");
+				goto fatal_error;
 			}
 		}
 	}
@@ -126,8 +122,7 @@ static void handle_can(void *p1, void *p2, void *p3)
 	LOG_DBG("Opening CAN device");
 	if (!device_is_ready(can.dev)) {
 		LOG_ERR("CAN interface is not ready");
-		k_msleep(1000);
-		__ASSERT(false, "Fatal error");
+		goto fatal_error;
 	}
 
 	set_can_normal(); // if using a newer board, tell the TCAN337 to not be silent
@@ -141,8 +136,7 @@ static void handle_can(void *p1, void *p2, void *p3)
 		err = CO_init(&can, node_id, CAN_BITRATE);
 		if (err != CO_ERROR_NO) {
 			LOG_ERR("CO_init failed (err = %d)", err);
-			k_msleep(1000);
-			__ASSERT(false, "Fatal error");
+			goto fatal_error;
 		}
 
 		if (IS_ENABLED(CONFIG_BOOTLOADER_MCUBOOT)) {
@@ -159,11 +153,14 @@ static void handle_can(void *p1, void *p2, void *p3)
 			timestamp = k_uptime_get();
 
 			if (get_can_fault()) {
-				// should we do anything, or is it caught by CO_isError() below?
+				// TODO: should we do anything, or is it caught by CO_isError() below?
+				// Investigate and modify if needed.
 				if (print_fault < MAX_FAULT_PRINTS) {
 					print_fault++;
 					LOG_WRN("CAN HW FAULT");
 				}
+			} else {
+				print_fault = 0; // ensure we print spurious errors mixed with normal operation
 			}
 
 			if (CO_isError(CO->em, CO_EM_CAN_TX_OVERFLOW)) {
@@ -193,10 +190,15 @@ static void handle_can(void *p1, void *p2, void *p3)
 		}
 	}
 
+	// The CAN host asked us to reset ourselves. Clean up and then do so (if enabled in this build).
 	CO_delete(&can);
 #if defined(CONFIG_REBOOT)
 	sys_reboot(SYS_REBOOT_COLD);
 #endif
+
+fatal_error:
+	k_msleep(1000);
+	__ASSERT(false, "Fatal error");
 }
 
 K_THREAD_DEFINE(can_id, CAN_THREAD_STACK_SIZE, handle_can, NULL, NULL, NULL, CAN_THREAD_PRIORITY, 0, 0);

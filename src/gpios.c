@@ -27,7 +27,7 @@ const struct gpio_dt_spec hw_rev_bit_2 = GPIO_DT_SPEC_GET(BP_NODE, hw_rev_bit_2_
 const struct gpio_dt_spec tcan_nfault_oc = GPIO_DT_SPEC_GET(BP_NODE, tcan_nfault_oc_gpios);
 const struct gpio_dt_spec tcan_silent = GPIO_DT_SPEC_GET(BP_NODE, tcan_silent_gpios);
 
-static unsigned raw_board_rev;
+static unsigned raw_board_rev = HW_REV_1_0_0;
 
 /**************************************************/
 
@@ -40,8 +40,69 @@ int init_gpios(void)
 	if (initialized) {
 		return 0;
 	}
-
 	initialized = true;
+
+	ret = gpio_pin_configure_dt(&hw_rev_bit_0, GPIO_INPUT | GPIO_PULL_UP);
+	if (ret) {
+		LOG_ERR("Could not configure hw_rev_bit_0 as input with pull up: %d", ret);
+		err = ret;
+	}
+	ret = gpio_pin_configure_dt(&hw_rev_bit_1, GPIO_INPUT | GPIO_PULL_UP);
+	if (ret) {
+		LOG_ERR("Could not configure hw_rev_bit_1 as input with pull up: %d", ret);
+		err = ret;
+	}
+	ret = gpio_pin_configure_dt(&hw_rev_bit_2, GPIO_INPUT | GPIO_PULL_UP);
+	if (ret) {
+		LOG_ERR("Could not configure hw_rev_bit_2 as input with pull up: %d", ret);
+		err = ret;
+	}
+
+	raw_board_rev = gpio_pin_get_dt(&hw_rev_bit_0) << 0 |
+				gpio_pin_get_dt(&hw_rev_bit_1) << 1 |
+				gpio_pin_get_dt(&hw_rev_bit_2) << 2;
+
+	LOG_INF("Board Rev %u", get_board_hw_rev());
+
+	return err;
+}
+
+int init_can_gpios(void)
+{
+	int ret;
+	int err = 0;
+	static bool gc_initialized = false;
+
+	if (gc_initialized) {
+		return 0;
+	}
+	gc_initialized = true;
+
+	ret = gpio_pin_configure_dt(&tcan_nfault_oc, GPIO_INPUT | GPIO_PULL_UP); // goes high on fault; v1.1+ boards only
+	if (ret) {
+		LOG_ERR("Could not configure tcan_nfault_oc as input with pull up: %d", ret);
+		err = ret;
+	}
+
+	ret = gpio_pin_configure_dt(&tcan_silent, GPIO_OUTPUT_INACTIVE); // put silent in disabled (normal) mode
+	if (ret) {
+		LOG_ERR("Could not configure tcan_silent as output inactive: %d", ret);
+		err = ret;
+	}
+
+	return err;
+}
+
+int init_mt_gpios(void)
+{
+	int ret;
+	int err = 0;
+	static bool gm_initialized = false;
+
+	if (gm_initialized) {
+		return 0;
+	}
+	gm_initialized = true;
 
 	err = gpio_pin_set_dt(&mt_en, false); // disable the STSPIN250s
 	if (err) {
@@ -75,49 +136,17 @@ int init_gpios(void)
 		err = ret;
 	}
 
-	ret = gpio_pin_configure_dt(&hw_rev_bit_0, GPIO_INPUT | GPIO_PULL_UP);
-	if (ret) {
-		LOG_ERR("Could not configure hw_rev_bit_0 as input with pull up: %d", ret);
-		err = ret;
-	}
-	ret = gpio_pin_configure_dt(&hw_rev_bit_1, GPIO_INPUT | GPIO_PULL_UP);
-	if (ret) {
-		LOG_ERR("Could not configure hw_rev_bit_1 as input with pull up: %d", ret);
-		err = ret;
-	}
-	ret = gpio_pin_configure_dt(&hw_rev_bit_2, GPIO_INPUT | GPIO_PULL_UP);
-	if (ret) {
-		LOG_ERR("Could not configure hw_rev_bit_2 as input with pull up: %d", ret);
-		err = ret;
-	}
-
-	raw_board_rev = gpio_pin_get_dt(&hw_rev_bit_0) << 0 |
-				gpio_pin_get_dt(&hw_rev_bit_1) << 1 |
-				gpio_pin_get_dt(&hw_rev_bit_2) << 2;
-
-	LOG_INF("Board Rev %u", get_board_hw_rev());
-
-	ret = gpio_pin_configure_dt(&tcan_nfault_oc, GPIO_INPUT | GPIO_PULL_UP); // goes high on fault; v1.1+ boards only
-	if (ret) {
-		LOG_ERR("Could not configure tcan_nfault_oc as input with pull up: %d", ret);
-		err = ret;
-	}
-
-	ret = gpio_pin_configure_dt(&tcan_silent, GPIO_OUTPUT_INACTIVE); // put silent in disabled (normal) mode
-	if (ret) {
-		LOG_ERR("Could not configure tcan_silent as output inactive: %d", ret);
-		err = ret;
-	}
-
 	return err;
 }
+
 
 board_hw_rev_t get_board_hw_rev(void)
 {
 	if (raw_board_rev == 7) { // no rev pins hooked up, so the pullups on the inputs make these all read as 1
 		return HW_REV_1_0_0;
 	}
-	return (board_hw_rev_t)raw_board_rev;	// otherwise, believe the value
+	// Otherwise, believe the value; if hardware init failed earlier, we return HW_REV_1_0_0.
+	return (board_hw_rev_t)raw_board_rev;
 }
 
 int set_can_silent(void)
