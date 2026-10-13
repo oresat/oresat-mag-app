@@ -12,38 +12,6 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(imu_bmi, CONFIG_MAG_IMU_LOG_LEVEL);
 
-/**
- * From the mag requirements doc, which reigns supreme not this
- * comment block:
- *
- * ICM-42688-P Gyroscope Care and Feeding
- *
- * Use GYRO_FS_SEL = 7 to get a full scale of  ±15.625 º/s
- * That should give us 2097.2 LSB/(º/s) sp that’s 476.8
- * microdps/bit
- *
- * Use ODR < 1kHz in order to get the 5 - 500 Hz bandwidth?
- *
- * Leave the gyro noise notch filter enabled (GYRO_NF_DIS = 0)
- * We probably want the lowest bandwidth through the notch
- * filter possible, which is  GYRO_NF_BW_SEL = 7 which gets us
- * to a bandwidth filter of 10 Hz.
- *
- * Follow the steps to program NF_COSWZ and NF_COSWZ_SEL.
- * 3dB Bandwidth of anti-aliasing filter (AAF) should be as low
- * as possible; 42 Hz GYRO_AAF_DELT = 1, GYRO_AAF_DELTSQR = 1,
- * GYRO_AAF_BITSHIFT = 15.
- *
- * Let’s use a Gyro ODR  of 100 Hz so GYRO_ODR = 0b1000, and
- * then do a running average down to 10 Hz (IIR style).
- *
- * Oh! Hey! We also want the temperature, too!
- *
- * Would be nice: the MCXN generates a 32.768 KHz clock signal
- * on INT2 and we use that as CLKIN. PIN9_FUNCTION should be
- * 0b10 then, otherwise it’s INT2 which is 0b00.
- */
-
 #define IMU_DEVICE_ADDR 0x68 // I2C 7 bit address
 #define IMU_DEVICE_ADDR_ALT 0x69 // I2C 7 bit address
 
