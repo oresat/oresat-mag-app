@@ -22,10 +22,13 @@
 #include "pwm.h"
 #include "adc.h"
 #include "imu.h"
+#include "gpios.h"
 #include "magnetometer.h"
 #include "windowed_average.h"
+#include "heap_stats.h"
+#include "magnetorquers.h"
 
-LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(magnetorquers, CONFIG_MAG_TQ_LOG_LEVEL);
 
 /* size of stack area used by each thread */
 #define STACK_SIZE 4096
@@ -35,11 +38,11 @@ LOG_MODULE_REGISTER(magnetorquers, LOG_LEVEL_INF);
 
 #define HIST_LEN 10								// number of current reading samples to use for running average
 
-#define MAGNETORQUER_STARTUP_DELAY 2000			// roughly when all the helper threads are up; TODO: add interthread signalling for this
-#define ITERATION_PERIOD 5						// ms
-#define DEBUG_PRINT_PERIOD 1500					// ms
-#define MAGNETORQUER_UPDATE_PERIOD 100          // ms
-#define MT_LOOP_PRINT_PERIOD 100
+#define MAGNETORQUER_STARTUP_DELAY_MS 2000		// roughly when all the helper threads are up; TODO: add interthread signalling for this
+#define ITERATION_PERIOD_MS 5					// ms
+#define DEBUG_PRINT_PERIOD_MS 1500				// ms
+#define MAGNETORQUER_UPDATE_PERIOD_MS 100		// ms
+#define MT_LOOP_PRINT_PERIOD_MS 100
 #define ISENSE_GAIN 50.0f						// gain of the INA185 op amp
 #define ISENSE_R_OHMS 0.030f					// resistance between the op amp + and - inputs
 #define VSENSE_INPUT_OFFSET_TYP_UV 5			// typically, the INA185 can have +/- this many microvolts offset on the input (pre-gain)
@@ -157,67 +160,7 @@ static char *axis_names[] = {
 	"X", "Y", "Z"
 };
 
-/* === GPIO data === */
-#define BP_NODE DT_NODELABEL(maggpios)
-
-static const struct gpio_dt_spec mt_en = GPIO_DT_SPEC_GET(BP_NODE, mt_en_gpios);
-static const struct gpio_dt_spec n_mt_en_fault = GPIO_DT_SPEC_GET(BP_NODE, n_mt_en_fault_gpios);
-static const struct gpio_dt_spec n_mt_stby_rst = GPIO_DT_SPEC_GET(BP_NODE, n_mt_stby_rst_gpios);
-static const struct gpio_dt_spec mt_x_phase = GPIO_DT_SPEC_GET(BP_NODE, mt_x_phase_gpios);
-static const struct gpio_dt_spec mt_y_phase = GPIO_DT_SPEC_GET(BP_NODE, mt_y_phase_gpios);
-static const struct gpio_dt_spec mt_z_phase = GPIO_DT_SPEC_GET(BP_NODE, mt_z_phase_gpios);
-static const struct gpio_dt_spec hw_rev_bit_0 = GPIO_DT_SPEC_GET(BP_NODE, hw_rev_bit_0_gpios);
-static const struct gpio_dt_spec hw_rev_bit_1 = GPIO_DT_SPEC_GET(BP_NODE, hw_rev_bit_1_gpios);
-static const struct gpio_dt_spec hw_rev_bit_2 = GPIO_DT_SPEC_GET(BP_NODE, hw_rev_bit_2_gpios);
-
 static int32_t control_current(const int32_t target_uA, int axis);
-
-static unsigned board_rev;
-
-/**************************************************/
-
-static int init_gpios(void)
-{
-	int ret;
-
-	// TODO: figure this out
-	// GPIO_LINE_OPEN_DRAIN gives an assertion:
-	// ASSERTION FAIL [(flags & (1 << 1)) != 0 || (flags & (1 << 2)) == 0] @ WEST_TOPDIR/zephyr/include/zephyr/drivers/gpio.h:1002
-
-	// this should be GPIO_OPEN_DRAIN, but the MCXN947 gpio driver does not support it
-	// instead, set to INPUT to float, or OUTPUT_INACTIVE to drive low
-	ret = gpio_pin_configure_dt(&mt_en, GPIO_INPUT);
-	if (ret) {
-		return ret;
-	}
-	ret = gpio_pin_configure_dt(&n_mt_en_fault, GPIO_INPUT);
-	if (ret) {
-		return ret;
-	}
-	ret = gpio_pin_configure_dt(&n_mt_stby_rst, GPIO_OUTPUT_INACTIVE);
-	if (ret) {
-		return ret;
-	}
-	// NOTE: the device tree should set the x/y/z_phase lines as active low, to fix logical-sense of the remainder of this code.
-	ret = gpio_pin_configure_dt(&mt_x_phase, GPIO_OUTPUT_INACTIVE);
-	if (ret) {
-		return ret;
-	}
-	ret = gpio_pin_configure_dt(&mt_y_phase, GPIO_OUTPUT_INACTIVE);
-	if (ret) {
-		return ret;
-	}
-	ret = gpio_pin_configure_dt(&mt_z_phase, GPIO_OUTPUT_INACTIVE);
-	if (ret) {
-		return ret;
-	}
-
-	ret = gpio_pin_configure_dt(&hw_rev_bit_0, GPIO_INPUT | GPIO_PULL_UP);
-	ret = gpio_pin_configure_dt(&hw_rev_bit_1, GPIO_INPUT | GPIO_PULL_UP);
-	ret = gpio_pin_configure_dt(&hw_rev_bit_2, GPIO_INPUT | GPIO_PULL_UP);
-
-	return ret;
-}
 
 /**************************************************/
 
@@ -251,7 +194,9 @@ static void handle_can_open_data(void)
 
 	CO_LOCK_OD();
 
-	strncpy(CO_OD_RAM.versions.fw_version, &APP_VERSION_STRING[6], ver_size);
+	// The CAN stack does not need arrays of characters to be NULL terminated, so use memcpy
+	// instead of strncpy or strcat.
+	memcpy(CO_OD_RAM.versions.fw_version, &APP_VERSION_STRING[6], ver_size);
 
 	for (int i = 0; i < 3; i++) {
 		if (g_adcs_data.mt_pwm_data[i].target_current_uA != *setpoints[i]) {
@@ -342,7 +287,7 @@ static void print_debug_output(void) {
 	static int64_t last_print_time = 0;
 	int64_t now = k_uptime_get();
 
-	if ((now - last_print_time) > DEBUG_PRINT_PERIOD) {
+	if ((now - last_print_time) > DEBUG_PRINT_PERIOD_MS) {
 		last_print_time = now;
 
 		LOG_INF("Magnetorquer iterations: %u", iterations);
@@ -356,14 +301,13 @@ static void print_debug_output(void) {
 		LOG_DBG( "  CO_OD_RAM.gyroscope.yaw_rate_raw = %d", CO_OD_RAM.gyroscope.yaw_rate_raw);
 		LOG_DBG( "  CO_OD_RAM.gyroscope.roll_rate_raw = %d", CO_OD_RAM.gyroscope.roll_rate_raw);
 
-#if 0 // current driver for the IMU does not support the accelerometer
 		LOG_DBG( "  CO_OD_RAM.accelerometer.x = %d", CO_OD_RAM.accelerometer.x);
 		LOG_DBG( "  CO_OD_RAM.accelerometer.y = %d", CO_OD_RAM.accelerometer.y);
 		LOG_DBG( "  CO_OD_RAM.accelerometer.z = %d", CO_OD_RAM.accelerometer.z);
 		LOG_DBG( "  CO_OD_RAM.accelerometer.x_raw = %d", CO_OD_RAM.accelerometer.X_raw);
 		LOG_DBG( "  CO_OD_RAM.accelerometer.y_raw = %d", CO_OD_RAM.accelerometer.Y_raw);
 		LOG_DBG( "  CO_OD_RAM.accelerometer.z_raw = %d", CO_OD_RAM.accelerometer.Z_raw);
-#endif
+
 		LOG_DBG( "  CO_OD_RAM.temperature = %d", CO_OD_RAM.temperature);
 
 		LOG_DBG( "  CO_OD_RAM.magnetorquer_current_x.current_setpoint = %d", CO_OD_RAM.magnetorquer.current_x_setpoint);
@@ -402,7 +346,10 @@ static void print_debug_output(void) {
 					(double)data->feedback_measurement_uA / 1000.0,
 					(double)data->feedback_measurement_V * 1000.0);
 		}
-		// LOG_DBG( "  CO_EM_GENERIC_ERROR:  %u", CO_isError(CO->em, CO_EM_GENERIC_ERROR));
+
+#if defined(CONFIG_SYS_HEAP_RUNTIME_STATS)
+		print_heap_stats();
+#endif
 	}
 }
 
@@ -448,7 +395,7 @@ static int32_t control_current(const int32_t target_uA, int axis)
 	float out;
 	mt_pwm_phase_data_t *data = &g_adcs_data.mt_pwm_data[axis];
 
-	// if command is 0, nothing to do; just reset internal vars 
+	// if command is 0, nothing to do; just reset internal vars
 	if (target_uA == 0) {
 		data->integral = 0; // reset integral -- not needed until target_uA > 0.
 		data->error = 0;
@@ -521,6 +468,31 @@ static int get_mag_readings(three_axis_data *axes)
 	return err;
 }
 
+static int get_accel_readings(three_axis_data *axes)
+{
+	int16_t ax;
+	int16_t ay;
+	int16_t az;
+
+	// ax/y/z are in milli-Gs/second
+	get_accel_data(&ax,
+				  &ay,
+				  &az);
+
+	axes->x = ax;
+	axes->y = ay;
+	axes->z = az;
+
+	get_accel_raw_data(&ax,
+					   &ay,
+					   &az);
+	axes->x_raw = ax;
+	axes->y_raw = ay;
+	axes->z_raw = az;
+
+	return 0;
+}
+
 static int get_gyro_readings(three_axis_data *axes, int16_t *temp_data)
 {
 	int16_t gx;
@@ -534,14 +506,16 @@ static int get_gyro_readings(three_axis_data *axes, int16_t *temp_data)
 				  &gz,
 				  temp_data);
 
-	// correct the orientation to be in the spacecraft frame of reference,
-	// not the sensor IC frame of reference
-	// sensor +x is satellite +y
-	// sensor -y is satellite +x
-	// sensor +z is satellite +z
-	axes->x = -gy;
-	axes->y = gx;
+	axes->x = gx;
+	axes->y = gy;
 	axes->z = gz;
+
+	get_gyro_raw_data(&gx,
+					  &gy,
+					  &gz);
+	axes->x_raw = gx;
+	axes->y_raw = gy;
+	axes->z_raw = gz;
 
 	return 0;
 }
@@ -570,8 +544,9 @@ static int get_current_readings(mt_pwm_phase_data_t *axes)
 		return 0;
 	}
 
-	// now read the values acquired
-	for (i = 0; i < get_num_adc_channels(); i++) {
+	// now read the values acquired; we only have 3 axes, but sometimes there is a 4th ADC for Vbusp measurements
+	// TODO: add handling of 4th ADC (if present) -- compensate using actual Vbusp going to the magnetorquer coils
+	for (i = 0; i < MIN(get_num_adc_channels(), 3); i++) {
 		err = read_adc(i, &adc_mv);
 		if (err) {
 			continue;
@@ -674,11 +649,6 @@ static int reset_magnetorquer(void)
 {
 	int err;
 
-	err = gpio_pin_configure_dt(&mt_en, GPIO_OUTPUT_INACTIVE); // drive the pin low -- disable power stage
-	if (err) {
-		LOG_ERR("Error configuring mt_en output low: %d", err);
-		return err;
-	}
 	err = gpio_pin_set_dt(&mt_en, false);
 	if (err) {
 		LOG_ERR("Error setting mt_en low: %d", err);
@@ -703,14 +673,6 @@ static int reset_magnetorquer(void)
 		return err;
 	}
 	k_sleep(K_MSEC(5));
-#if 0
-	err = gpio_pin_configure_dt(&mt_en, GPIO_INPUT); // float the pin; enable power stage
-	if (err) {
-		LOG_ERR("Error floating mt_en: %d", err);
-		return err;
-	}
-	k_sleep(K_MSEC(5));
-#endif
 	return err;
 }
 
@@ -726,15 +688,15 @@ static int init_magnetorquer(void) {
 
 	err = init_gpios();
 	if (err) {
-		LOG_ERR("Error initializing GPIOS: %d", err);
+		LOG_ERR("Error initializing general GPIOs: %d", err);
 		return err;
 	}
 
-	board_rev = gpio_pin_get_dt(&hw_rev_bit_0) << 0 |
-				gpio_pin_get_dt(&hw_rev_bit_1) << 1 |
-				gpio_pin_get_dt(&hw_rev_bit_2) << 2;
-
-	LOG_INF("Board Rev %u", board_rev);
+	err = init_mt_gpios();
+	if (err) {
+		LOG_ERR("Error initializing magnetorquer GPIOs: %d", err);
+		return err;
+	}
 
 	err = init_dac();
 	if (err) {
@@ -761,11 +723,6 @@ static int init_magnetorquer(void) {
 		return err;
 	}
 
-	err = gpio_pin_configure_dt(&mt_en, GPIO_OUTPUT_INACTIVE); // drive the pin low
-	if (err) {
-		LOG_ERR("Error configuring mt_en output low: %d", err);
-		return err;
-	}
 	err = gpio_pin_set_dt(&mt_en, false);
 	if (err) {
 		LOG_ERR("Error setting mt_en low: %d", err);
@@ -813,21 +770,6 @@ static int init_magnetorquer(void) {
 	return err;
 }
 
-static void check_magnetorquer_fault(void)
-{
-	int fault;
-
-	fault = gpio_pin_get_dt(&n_mt_en_fault);
-	if (!fault) {
-		LOG_WRN("Fault on magnetorquer driver(s)!");
-
-		// TODO: ask Andrew if this is ok to do. It wasn't in the old code.
-		// LOG_INF("Resetting magnetorquer drivers.");
-		// (void)reset_magnetorquer();
-	}
-
-}
-
 #if !defined(CONFIG_MAGNETORQUER_EXPLORE) // normal operation
 
 static int handle_magnetorquer(void *p1, void *p2, void *p3)
@@ -835,7 +777,7 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 	int err;
 
 	k_thread_name_set(magtqr_id, "magtqr_thread");
-	k_sleep(K_MSEC(MAGNETORQUER_STARTUP_DELAY));
+	k_sleep(K_MSEC(MAGNETORQUER_STARTUP_DELAY_MS));
 
 	LOG_INF("Starting MAGNETORQUER thread");
 
@@ -852,6 +794,11 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 	LOG_INF("Starting magnetorquer loop");
 	for (;;) {
 		iterations++;
+
+		err = get_accel_readings(&g_adcs_data.accl_data);
+		if (err) {
+			LOG_WRN("Error reading accel data: %d", err);
+		}
 
 		err = get_gyro_readings(&g_adcs_data.gyro_data, &g_adcs_data.temp_data);
 		if (err) {
@@ -875,14 +822,16 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 			LOG_WRN("One or more PWM channels could not be set: %d", err);
 		}
 
-		check_magnetorquer_fault();
+		if (check_magnetorquer_fault()) {
+			// TODO: discuss if we should do something on a magnetorquer hardware fault.
+		}
 
 		print_debug_output();
 
 		handle_can_open_data();
 
 		t_now = k_uptime_get();
-		int32_t t_sleep = (int32_t)(ITERATION_PERIOD - (t_now - t_last));
+		int32_t t_sleep = (int32_t)(ITERATION_PERIOD_MS - (t_now - t_last));
 
 		if (t_sleep <= 0) {
 			t_sleep = 1;
@@ -949,6 +898,12 @@ static void reset_ramp_mode(void)
 
 static int handle_magnetorquer(void *p1, void *p2, void *p3)
 {
+	// We don't need these functions in shell mode.
+	(void)get_gyro_readings;
+	(void)get_accel_readings;
+	(void)get_mag_readings;
+	(void)print_debug_output;
+
 	int err;
 	uint32_t adc_val;
 	int64_t t_start = k_uptime_get(); // in milliseconds
@@ -1024,7 +979,7 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 				mt_ramp_info.stop_ua = max_i_ua[mt_ramp_info.axis]; // adjust the upper bounds per axis
 				LOG_INF("x pwm, x targ mA, x fb mA,  x integ, x err, y pwm, y targ mA, y fb mA, y integ, y err, z pwm, z targ mA, z fb mA, z integ, z err");
 			}
-			if ((t_now - t_mt_print) > MT_LOOP_PRINT_PERIOD) {
+			if ((t_now - t_mt_print) > MT_LOOP_PRINT_PERIOD_MS) {
 				t_mt_print = t_now;
 				print_loop = true;
 			} else {
@@ -1065,7 +1020,7 @@ static int handle_magnetorquer(void *p1, void *p2, void *p3)
 		handle_can_open_data();
 
 		t_now = k_uptime_get();
-		int32_t t_sleep = (int32_t)(ITERATION_PERIOD - (t_now - t_last));
+		int32_t t_sleep = (int32_t)(ITERATION_PERIOD_MS - (t_now - t_last));
 
 		if (t_sleep <= 0) {
 			t_sleep = 1;

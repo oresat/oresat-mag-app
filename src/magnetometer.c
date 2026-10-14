@@ -22,7 +22,7 @@
 
 #include "magnetometer.h"
 
-LOG_MODULE_REGISTER(magnetometer, CONFIG_SENSOR_LOG_LEVEL);
+LOG_MODULE_REGISTER(magnetometer, CONFIG_MAG_MM_LOG_LEVEL);
 
 #define N		(8)
 #define M		(N/2)
@@ -47,7 +47,7 @@ LOG_MODULE_REGISTER(magnetometer, CONFIG_SENSOR_LOG_LEVEL);
 #define BP_NODE DT_NODELABEL(maggpios)
 
 // Copied from zephyr/dsp/utils.h (you end up needing to pull in a bunch of DSP stuff, including a library,
-// simply to access this macro, which is overkill.
+// simply to access this macro, which is overkill.)
 // Removed the "Z_" prefix t prevent conflicts in the future.
 #define SHIFT_Q31_TO_F32(src, m) ((float32_t)(((int64_t)src) << m) / (float32_t)(1U << 31))
 
@@ -98,6 +98,12 @@ static void stop_end_cap_magnetometers(void) {
 static void start_end_cap_magnetometers(void) {
 	gpio_pin_set_dt(&n_mag_en, true);
 	k_sleep(K_MSEC(10));
+	if (gpio_pin_get_dt(&mag_ready)) {
+		LOG_INF("MAG_PWR is ready!");
+	} else {
+		LOG_ERR("MAG_PWR is not ready!");
+	}
+
 }
 
 static const struct device *check_rm3100_sensor(const struct device *rm3100_dev)
@@ -214,7 +220,7 @@ int get_mag_reading(int mag_num, int32_t *x, int32_t *y, int32_t *z)
 	This means the decoder fn above uses shift = 11 and divider = 75 (uT per LSB).
 	Further, the decoder scales the data (micro_tesla_scaled) then divides by 100
 	to get gauss_scaled, which is the raw output value.
-	To extract the integer portion in gauss, Zephyr samples such as 
+	To extract the integer portion in gauss, Zephyr samples such as
 	zephyr/sensors/sample/stream_fifo/src/main.c use a series of macros:
 	PRIsensor_q31_data_arg() from zephyr/include/zephyr/drivers/sensor_data_types.h, which then
 	uses macros from zephyr/include/zephyr/dsp/print_format.h: PRIq_arg() etc.

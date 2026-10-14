@@ -17,7 +17,7 @@
 #include <zephyr/drivers/adc.h>
 #include <zephyr/logging/log.h>
 
-LOG_MODULE_REGISTER(oresat_adc, CONFIG_ADC_LOG_LEVEL);
+LOG_MODULE_REGISTER(oresat_adc, CONFIG_MAG_ADC_LOG_LEVEL);
 
 #define MAX_ADC_READ_TRIES 10
 

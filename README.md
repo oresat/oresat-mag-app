@@ -2,23 +2,46 @@
 
 OreSat Zephyr app for the mag card.
 
-This card hosts both the magnetorquers and the magnetometers.
+This card hosts an IMU on board, with interfaces to external
+magnetorquer coils and magnetometers.
 
-A separate reaction-wheel board with its own app will be
-physically attached to the mag card.
+Depending on the hardware version of the card, the IMU is either a TDK
+ICM-42688 (board v1.0.0) or a Bosch Sensortec BMI-270 (board v1.1.0).
+It is important to build and flash the correct version or else the IMU will be inoperative.
+
+The magnetorquer coils connect to the card via J3, J4, and J5.
+
+The magnetometers are located on the +Z and optionally also the -Z
+end caps, which are daughter boards to the +Z and -Z end cards. The
+signals to them are MAG_PWR, MAG_SCL, and MAG_SDA, which route over
+the backplane -- there are NO connectors for them on the mag card.
+Further, these signals are only usable when the mag card and end card(s)
+are powered by the OPD over the backplane -- you cannot test the
+magnetometers with the mag card only powered by the debug connector.
 
 # Building and flashing
 Ensure you are in the `mag` directory (`cd src/oresat/firmware/apps/mag`) prior to building.
 
-> NOTE:
->   The `mcxn947_mag_card` is the default. It normally does not need to be specified as shown below,
->   except for the important exception of enabling MCUboot. In that case, it is mandatory for Zephyr 4.2.0.
+> **NOTE 1:**
+>   The `mcxn947_mag_card` v1.1.0 is now the default. It normally does not need to be specified.
 
-| Board         | Build Example                                         |
-| ------------- | ----------------------------------------------------- |
-| mcxn947_mag_card | `west build -p always -b mcxn947_mag_card/mcxn947/cpu0 -- -DCONFIG_MCUBOOT_ALLOWED=n` |
-| mcxn947_mag_card with shell | `west build -p always -b mcxn947_mag_card/mcxn947/cpu0 -- -DEXTRA_CONF_FILE=overlay_shell.conf -DCONFIG_MCUBOOT_ALLOWED=n` |
-| mcxn947_mag_card with MCUboot | `west build -p always -b mcxn947_mag_card/mcxn947/cpu0 --sysbuild -- -DBOARD_ROOT=$PWD` |
+> **NOTE 2:**
+>   If you are building for obsolete mag card hardware v1.0.0, you must specify it using the Zephyr board revision syntax:
+>   [Zephyr Board Revision Syntax] for every combination of features.
+
+> **NOTE 3:**
+>   You no longer need to specify the board revision nor the location of BOARD_ROOT when building with
+>   MCUBOOT support (sysbuild). This is now done for you in the local file `sysbuild/CMakeLists.txt`.
+
+| Board And Features | Build Command                                         |
+| ------------------ | ----------------------------------------------------- |
+| mcxn947_mag_card v1.1.0 | `west build -p always -- -DCONFIG_MCUBOOT_ALLOWED=n` |
+| mcxn947_mag_card v1.1.0 with shell | `west build -p always -- -DEXTRA_CONF_FILE=overlay_shell.conf -DCONFIG_MCUBOOT_ALLOWED=n` |
+| mcxn947_mag_card v1.1.0 with MCUboot | `west build -p always --sysbuild` |
+| |
+| mcxn947_mag_card v1.0.0 | `west build -p always -b mcxn947_mag_card@1.0.0/mcxn947/cpu0 -- -DCONFIG_MCUBOOT_ALLOWED=n` |
+| mcxn947_mag_card v1.0.0 with shell | `west build -p always -b mcxn947_mag_card@1.0.0/mcxn947/cpu0 -- -DEXTRA_CONF_FILE=overlay_shell.conf -DCONFIG_MCUBOOT_ALLOWED=n` |
+| mcxn947_mag_card v1.0.0 with MCUboot | `west build -p always -b mcxn947_mag_card@1.0.0/mcxn947/cpu0 --sysbuild` |
 
 > NOTE: the section below only gives general instructions. Specific steps below (like for setting the CAN node id) are self-contained
 >   in the section.
@@ -32,7 +55,7 @@ CAN.
 
 For the first build, or when previously running with the bootloader:
 ```
-$ west build -p
+$ west build -p <remainder of desired build from table above...>
 $ west flash --erase
 ```
 
@@ -69,7 +92,7 @@ This requires three steps in practice:
 ## Enabling the shell
 Do a build with the `overlay_shell.conf` file as a parameter to `west build`:
 ```
-$ west build -- -DEXTRA_CONF_FILE=overlay_shell.conf
+$ west build -- -DEXTRA_CONF_FILE=overlay_shell.conf -DCONFIG_MCUBOOT_ALLOWED=n
 ```
 Flash as explained earlier.
 
@@ -91,9 +114,27 @@ Commands:
   The value is then stored in the settings partition, so as long as you do not do a full chip erase,
   it will be remembered.
 
+- `accelcal [reset]`<enter> to do initial accelerometer calibration without the reset option.
+  NOTE: this command is not implemented for the ICM-42688 interface on mag card v1.0.0.
+
+  The unit must be stationary, with it vertical (as if it were plugged into the satellite backplane),
+  with the backplane connector J1 lowermost, and the debug connector J2 uppermost. In other words,
+  the +X axis should be downward towards the center of the Earth.
+  The command without the reset option takes approximately 1 second to run.
+
+  If the accelerometer has already been calibrated, add the optional reset parameter: `accelcal reset`<enter>.
+  This will take approximately 10 seconds to run.
+
+  Once calibrated, the values obtained are considered an offset from 0 to be subtracted from future
+  measurements. Like the `nodeid`, the calibration values are stored in the settings partition.
+
 - `gyrocal [reset]`<enter> to do initial gyroscope calibration without the reset option.
-  The unit must be stationary.
+
+  The unit must be stationary. The command without the reset option takes approximately 1 second to run.
+
   If the gyroscope has already been calibrated, add the optional reset parameter: `gyrocal reset`<enter>.
+  This will take approximately 10 seconds to run.
+
   Once calibrated, the values obtained are considered an offset from 0 to be subtracted from future
   measurements. Like the `nodeid`, the calibration values are stored in the settings partition.
 
@@ -122,7 +163,7 @@ Build again, using whatever options you need as explained in the document.
 
 # Building and flashing with bootloader
 ```
-$ west build -p -b mcxn947_mag_card/mcxn947/cpu0 --sysbuild -- -DBOARD_ROOT=$PWD
+$ west build -p --sysbuild
 $ west flash --erase
 ```
 This will build two binaries: one for the bootloader, and one for the application.
@@ -167,3 +208,6 @@ $ python3 flash_canopen.py --serial-port /dev/ttyACM1 --bin  build/mag/zephyr/ze
 
 > NOTE: The CAN id must be changed to the proper one for this card before the
 >  C3 can access it.
+
+[Zephyr Board Revision Syntax]:https://docs.zephyrproject.org/4.4.1/develop/application/index.html#building-for-a-board-revision
+
